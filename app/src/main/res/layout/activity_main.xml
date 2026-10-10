@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fillViewport="true">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="24dp">
+    android:padding="20dp">
 
     <Button
         android:id="@+id/btnToggle"
@@ -17,81 +22,130 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="复制连接地址"
-        android:textSize="18sp"
-        android:layout_marginTop="12dp" />
+        android:textSize="16sp"
+        android:layout_marginTop="10dp" />
 
     <TextView
         android:id="@+id/tvManualTitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
+        android:layout_marginTop="20dp"
         android:text="—— 手动控制 ——"
         android:textStyle="bold"
         android:textSize="16sp" />
 
-    <SeekBar
-        android:id="@+id/seekLevel"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:max="8"
-        android:progress="0" />
-
     <TextView
-        android:id="@+id/tvLevel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:fontFamily="monospace"
-        android:text="档位:1"
-        android:textSize="14sp" />
+        android:layout_marginTop="10dp"
+        android:text="🔊 震动"
+        android:textStyle="bold"
+        android:textSize="15sp" />
+
+    <SeekBar
+        android:id="@+id/seekVib"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="9"
+        android:progress="0" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="8dp">
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvVibLevel"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text="震动:0 档"
+            android:textSize="14sp" />
 
         <Button
             android:id="@+id/btnVib"
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:minHeight="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="上游开"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="↕️ 伸缩"
+        android:textStyle="bold"
+        android:textSize="15sp" />
+
+    <SeekBar
+        android:id="@+id/seekOsc"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="9"
+        android:progress="0" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvOscLevel"
+            android:layout_width="0dp"
             android:layout_weight="1"
-            android:text="只开震动"
-            android:textSize="15sp" />
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text="伸缩:0 档"
+            android:textSize="14sp" />
 
         <Button
             android:id="@+id/btnOsc"
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="只开伸缩"
-            android:textSize="15sp" />
+            android:minHeight="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="上游开"
+            android:textSize="13sp" />
     </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="开关 = 是否响应上游客户端(游戏/Intiface)的请求;滑条为本地手动,不受开关限制。"
+        android:textSize="11sp"
+        android:textColor="#888888" />
 
     <Button
         android:id="@+id/btnCalib"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="校准(伸缩低速回基准位)"
-        android:textSize="15sp" />
+        android:layout_marginTop="12dp"
+        android:text="校准(1档伸缩运行N秒后停,长按调时长)"
+        android:textSize="14sp" />
 
     <Button
         android:id="@+id/btnExport"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="10dp"
         android:text="导出调试日志"
-        android:textSize="15sp" />
+        android:textSize="14sp" />
 
     <TextView
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="14dp"
         android:fontFamily="monospace"
         android:textSize="13sp"
         android:text="已停止。" />
 
 </LinearLayout>
+</ScrollView>
