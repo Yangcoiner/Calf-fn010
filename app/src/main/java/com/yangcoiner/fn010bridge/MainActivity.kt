@@ -32,10 +32,14 @@ class MainActivity : AppCompatActivity() {
         LogHelper.init(applicationContext)
 
         tvStatus = findViewById(R.id.tvStatus)
-        findViewById<Button>(R.id.btnStart).setOnClickListener {
-            if (hasPermissions()) startAll() else requestPerms()
+        updateToggleUi()
+        val toggle = findViewById<Button>(R.id.btnToggle)
+        toggle.setOnClickListener {
+            if (server != null) stopAll() else {
+                if (hasPermissions()) startAll() else requestPerms()
+            }
         }
-        findViewById<Button>(R.id.btnStop).setOnClickListener { stopAll() }
+        updateToggleUi()
         findViewById<Button>(R.id.btnExport).setOnClickListener { exportLog() }
         findViewById<Button>(R.id.btnCopy).setOnClickListener {
             val addr = "ws://" + getLocalIp() + ":12345"
@@ -100,6 +104,20 @@ class MainActivity : AppCompatActivity() {
                "局域网连接:$addr\n" +
                "本机连接:ws://127.0.0.1:12345\n" +
                "正在扫描 FN010-RX ...")
+        updateToggleUi()
+    }
+
+    private fun updateToggleUi() {
+        val btn = findViewById<Button>(R.id.btnToggle)
+        if (server != null) {
+            btn.text = "停止(马达全关)"
+            btn.setBackgroundColor(0xFFD32F2F.toInt())
+            btn.setTextColor(0xFFFFFFFF.toInt())
+        } else {
+            btn.text = "启动服务器并扫描"
+            btn.setBackgroundColor(0xFF2E7D32.toInt())
+            btn.setTextColor(0xFFFFFFFF.toInt())
+        }
     }
 
     private fun stopAll() {
@@ -108,6 +126,7 @@ class MainActivity : AppCompatActivity() {
         ble?.shutdown()
         ble = null
         status("已停止。")
+        updateToggleUi()
     }
 
     private fun exportLog() {
