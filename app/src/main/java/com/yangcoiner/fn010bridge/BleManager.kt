@@ -50,6 +50,11 @@ class BleManager(
     var ready = false
         private set
 
+    // 手动遮罩:为 true 时,上游客户端(WS ScalarCmd/StopCmd)对该马达的指令
+    // 一律【不向蓝牙发送】(对客户端仍返回 Ok),只有 App 手动控制能驱动该马达。
+    @Volatile var maskVib = false
+    @Volatile var maskOsc = false
+
     var onReady: (() -> Unit)? = null
 
     fun start() {
@@ -191,24 +196,37 @@ class BleManager(
         return ok
     }
 
-    fun vibrate(scalar: Double): Boolean {
+    /**
+     * manual=true 表示来自 App 手动控制/校准,无视遮罩直发;
+     * 否则视为上游客户端指令,遮罩开启时直接吞掉(不发蓝牙,返回 true 让客户端收到 Ok)。
+     */
+    fun vibrate(scalar: Double, manual: Boolean = false): Boolean {
+        if (!manual && maskVib) return true
         val s = speedFromScalar(scalar)
         return send(MOTOR_VIBRATION, s > 0, s)
     }
 
-    fun oscillate(scalar: Double): Boolean {
+    fun oscillate(scalar: Double, manual: Boolean = false): Boolean {
+        if (!manual && maskOsc) return true
         val s = speedFromScalar(scalar)
         return send(MOTOR_OSCILLATION, s > 0, s)
     }
 
+    /** 上游停止指令:只停未被手动遮罩的马达,手动开着的保持不动。 */
     fun stopAll() {
+        if (!maskVib) send(MOTOR_VIBRATION, false, 0)
+        if (!maskOsc) send(MOTOR_OSCILLATION, false, 0)
+    }
+
+    /** App 本地的「马达全关」(停止服务器/校准收尾):无视遮罩全停。 */
+    fun forceStopAll() {
         send(MOTOR_VIBRATION, false, 0)
         send(MOTOR_OSCILLATION, false, 0)
     }
 
     @SuppressLint("MissingPermission")
     fun shutdown() {
-        try { stopAll() } catch (_: Exception) {}
+        try { forceStopAll() } catch (_: Exception) {}
         ready = false
         try {
             gatt?.disconnect()
