@@ -142,8 +142,9 @@ class BleManager(
 
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            // Device rarely speaks; log at debug level only.
-            Log.d("FN010", "notify: " + characteristic.value?.joinToString("") { "%02x".format(it) })
+            val hex = characteristic.value?.joinToString("") { "%02x".format(it) } ?: ""
+            Log.d("FN010", "notify: $hex")
+            LogHelper.log("BLE", "RX notify: $hex")
         }
     }
 
@@ -154,6 +155,7 @@ class BleManager(
         w.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         w.value = byteArrayOf(0xaf.toByte(), 0x00)
         val ok = g.writeCharacteristic(w)
+        LogHelper.log("BLE", "TX handshake af00 -> $ok")
         if (ok) {
             ready = true
             onStatus("握手完成,设备就绪!")
@@ -183,7 +185,10 @@ class BleManager(
         )
         w.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         w.value = frame
-        return g.writeCharacteristic(w)
+        val hex = frame.joinToString("") { "%02x".format(it) }
+        val ok = g.writeCharacteristic(w)
+        LogHelper.log("BLE", "TX ${if (ok) "ok" else "FAIL"}: $hex")
+        return ok
     }
 
     fun vibrate(scalar: Double): Boolean {
