@@ -18,6 +18,16 @@
         android:label="FN010 Bridge"
         android:theme="@style/Theme.AppCompat.Light">
 
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.yangcoiner.fn010bridge.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
