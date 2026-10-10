@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +18,10 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
+    private lateinit var tvLevel: TextView
+    private var manualVib = false
+    private var manualOsc = false
+    private var calibrating = false
 
     companion object {
         // 进程级状态:Activity 重建(切后台/转屏)后服务器不会丢失,也不会重复绑定端口
@@ -24,29 +29,106 @@ class MainActivity : AppCompatActivity() {
         @Volatile var server: ButtplugServer? = null
     }
 
-    private val log = StringBuilder()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         LogHelper.init(applicationContext)
 
         tvStatus = findViewById(R.id.tvStatus)
+        tvLevel = findViewById(R.id.tvLevel)
         updateToggleUi()
+
         val toggle = findViewById<Button>(R.id.btnToggle)
         toggle.setOnClickListener {
             if (server != null) stopAll() else {
                 if (hasPermissions()) startAll() else requestPerms()
             }
         }
-        updateToggleUi()
         findViewById<Button>(R.id.btnExport).setOnClickListener { exportLog() }
         findViewById<Button>(R.id.btnCopy).setOnClickListener {
             val addr = "ws://" + getLocalIp() + ":12345"
             copyAddr(addr + "\nws://127.0.0.1:12345")
             Toast.makeText(this, "已复制局域网+本机两个地址", Toast.LENGTH_SHORT).show()
         }
+
+        // ---- 手动控制区 ----
+        val seek = findViewById<SeekBar>(R.id.seekLevel)
+        seek.max = 8 // 0..8 => 档位 1..9
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                tvLevel.text = "档位:${progress + 1}"
+                val b = ble ?: return
+                if (manualVib) b.vibrate((progress + 1) / 9.0, manual = true)
+                if (manualOsc) b.oscillate((progress + 1) / 9.0, manual = true)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+
+        findViewById<Button>(R.id.btnVib).setOnClickListener {
+            val b = ble ?: run { toast("请先启动服务器并连接设备"); return@setOnClickListener }
+            manualVib = !manualVib
+            b.maskVib = manualVib // 遮罩:开启后上游客户端调不动震动马达
+            b.vibrate(if (manualVib) level() / 9.0 else 0.0, manual = true)
+            paintManual()
+            LogHelper.log("MANUAL", "vibration -> $manualVib (level ${level()}, mask=${b.maskVib})")
+        }
+        findViewById<Button>(R.id.btnOsc).setOnClickListener {
+            val b = ble ?: run { toast("请先启动服务器并连接设备"); return@setOnClickListener }
+            manualOsc = !manualOsc
+            b.maskOsc = manualOsc // 遮罩:开启后上游客户端调不动伸缩马达
+            b.oscillate(if (manualOsc) level() / 9.0 else 0.0, manual = true)
+            paintManual()
+            LogHelper.log("MANUAL", "oscillation -> $manualOsc (level ${level()}, mask=${b.maskOsc})")
+        }
+
+        // ---- 校准:伸缩以 1 档低速运行 N 秒后自动停止,作为行程时间基准 ----
+        findViewById<Button>(R.id.btnCalib).setOnClickListener {
+            val b = ble ?: run { toast("请先启动服务器并连接设备"); return@setOnClickListener }
+            if (calibrating) return@setOnClickListener
+            calibrating = true
+            val seconds = getPrefs().getFloat("calib_seconds", 3.0f)
+            Toast.makeText(this, "校准中:1档伸缩 ${seconds}s 后自动停止...", Toast.LENGTH_SHORT).show()
+            LogHelper.log("CALIB", "start ${seconds}s @ level 1")
+            b.oscillate(1.0 / 9, manual = true)
+            Thread {
+                try { Thread.sleep((seconds * 1000).toLong()) } catch (_: Exception) {}
+                b.oscillate(0.0, manual = true)
+                manualOsc = false
+                runOnUiThread {
+                    calibrating = false
+                    paintManual()
+                    status("校准完成:伸缩低速运行 ${seconds}s 后已停(时长可长按校准钮调整)。")
+                }
+                LogHelper.log("CALIB", "done")
+            }.start()
+        }
+        findViewById<Button>(R.id.btnCalib).setOnLongClickListener {
+            val prefs = getPrefs()
+            val cur = prefs.getFloat("calib_seconds", 3.0f)
+            val next = if (cur >= 10f) 1.5f else cur + 1.5f
+            prefs.edit().putFloat("calib_seconds", next).apply()
+            toast("校准时长:${next}s(长按循环 1.5~10s)")
+            true
+        }
     }
+
+    private fun level(): Int = findViewById<SeekBar>(R.id.seekLevel).progress + 1
+
+    private fun getPrefs() = getSharedPreferences("fn010", Context.MODE_PRIVATE)
+
+    private fun paintManual() {
+        val bv = findViewById<Button>(R.id.btnVib)
+        val bo = findViewById<Button>(R.id.btnOsc)
+        bv.text = if (manualVib) "震动:开" else "只开震动"
+        bv.setBackgroundColor(if (manualVib) 0xFF1565C0.toInt() else 0xFF455A64.toInt())
+        bv.setTextColor(0xFFFFFFFF.toInt())
+        bo.text = if (manualOsc) "伸缩:开" else "只开伸缩"
+        bo.setBackgroundColor(if (manualOsc) 0xFF6A1B9A.toInt() else 0xFF455A64.toInt())
+        bo.setTextColor(0xFFFFFFFF.toInt())
+    }
+
+    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
     private fun neededPerms(): Array<String> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
@@ -78,7 +160,6 @@ class MainActivity : AppCompatActivity() {
             status("未检测到蓝牙适配器。")
             return
         }
-
         if (server != null) {
             status("服务器已在运行中(端口 12345),无需重复启动。")
             return
@@ -93,9 +174,11 @@ class MainActivity : AppCompatActivity() {
             srv.start()
             server = srv
         } catch (e: Exception) {
-            status("服务器启动失败:${e.message}\n请点「全部停止」后重试。")
+            status("服务器启动失败:${e.message}\n请点「停止」后重试。")
             b.shutdown()
             ble = null
+            updateToggleUi()
+            return
         }
 
         val addr = "ws://" + getLocalIp() + ":12345"
@@ -104,6 +187,18 @@ class MainActivity : AppCompatActivity() {
                "局域网连接:$addr\n" +
                "本机连接:ws://127.0.0.1:12345\n" +
                "正在扫描 FN010-RX ...")
+        updateToggleUi()
+    }
+
+    private fun stopAll() {
+        try { server?.stop() } catch (_: Exception) {}
+        server = null
+        ble?.shutdown()
+        ble = null
+        manualVib = false
+        manualOsc = false
+        paintManual()
+        status("已停止。")
         updateToggleUi()
     }
 
@@ -118,15 +213,6 @@ class MainActivity : AppCompatActivity() {
             btn.setBackgroundColor(0xFF2E7D32.toInt())
             btn.setTextColor(0xFFFFFFFF.toInt())
         }
-    }
-
-    private fun stopAll() {
-        try { server?.stop() } catch (_: Exception) {}
-        server = null
-        ble?.shutdown()
-        ble = null
-        status("已停止。")
-        updateToggleUi()
     }
 
     private fun exportLog() {
@@ -150,13 +236,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun status(msg: String) {
-        LogHelper.log("APP", msg)
-        log.append(msg).append('\n')
-        if (log.length > 4000) log.delete(0, log.length - 4000)
-        tvStatus.text = log.toString()
+    private fun copyAddr(addr: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("fn010-ws", addr))
     }
-}
 
     /** 获取手机在局域网中的 IPv4 地址(非回环)。 */
     private fun getLocalIp(): String {
@@ -170,7 +253,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun copyAddr(addr: String) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        cm.setPrimaryClip(android.content.ClipData.newPlainText("fn010-ws", addr))
+    private fun status(msg: String) {
+        LogHelper.log("APP", msg)
+        tvStatus.text = msg + "\n"
     }
+}
