@@ -61,12 +61,16 @@ class ButtplugServer(
 
     override fun onMessage(ws: WebSocket, message: String) {
         try {
+            LogHelper.log("WS", "RX: $message")
             val msgs = JSONArray(message)
             val replies = JSONArray()
             for (i in 0 until msgs.length()) {
                 handle(msgs.getJSONObject(i), replies)
             }
-            if (replies.length() > 0) ws.send(replies.toString())
+            if (replies.length() > 0) {
+                LogHelper.log("WS", "TX: $replies")
+                ws.send(replies.toString())
+            }
         } catch (e: Exception) {
             ws.send(errJson(0, "Message", "消息解析失败:${e.message}").toString())
         }
