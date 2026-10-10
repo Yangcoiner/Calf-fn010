@@ -6,7 +6,7 @@
     android:padding="24dp">
 
     <Button
-        android:id="@+id/btnStart"
+        android:id="@+id/btnToggle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="启动服务器并扫描"
@@ -25,14 +25,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="导出调试日志"
-        android:textSize="18sp"
-        android:layout_marginTop="12dp" />
-
-    <Button
-        android:id="@+id/btnStop"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="全部停止"
         android:textSize="18sp"
         android:layout_marginTop="12dp" />
 
