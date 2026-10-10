@@ -203,7 +203,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopAll() {
-        try { server?.stop() } catch (_: Exception) {}
+        try { server?.shutdownServer() } catch (_: Exception) {}
         server = null
         ble?.shutdown()
         ble = null
