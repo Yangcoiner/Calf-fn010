@@ -9,14 +9,14 @@
         android:id="@+id/btnStart"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Start Server + Scan"
+        android:text="启动服务器并扫描"
         android:textSize="18sp" />
 
     <Button
         android:id="@+id/btnStop"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Stop (all devices off)"
+        android:text="全部停止"
         android:textSize="18sp"
         android:layout_marginTop="12dp" />
 

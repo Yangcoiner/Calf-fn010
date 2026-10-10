@@ -36,23 +36,27 @@ class ButtplugServer(
     }
 
     override fun onStart() {
-        onStatus("Buttplug server listening on port $port")
+        onStatus("Buttplug 服务器监听端口 $port")
     }
 
     override fun onOpen(ws: WebSocket, handshake: ClientHandshake) {
         client = ws
-        onStatus("Client connected: ${ws.remoteSocketAddress}")
+        onStatus("客户端已连接:${ws.remoteSocketAddress}")
     }
 
     override fun onClose(ws: WebSocket, code: Int, reason: String, remote: Boolean) {
         if (client === ws) client = null
         // Safety: stop motors when the client goes away.
         ble.stopAll()
-        onStatus("Client disconnected ($code). Motors stopped.")
+        onStatus("客户端断开 ($code),马达已自动停止。")
     }
 
     override fun onError(ws: WebSocket?, ex: Exception) {
-        onStatus("WS error: ${ex.message}")
+        if (ex.message?.contains("Address already in use") == true) {
+            onStatus("端口 12345 已被占用,请点「全部停止」后重新启动。")
+        } else {
+            onStatus("WebSocket 错误:${ex.message}")
+        }
     }
 
     override fun onMessage(ws: WebSocket, message: String) {
@@ -64,7 +68,7 @@ class ButtplugServer(
             }
             if (replies.length() > 0) ws.send(replies.toString())
         } catch (e: Exception) {
-            ws.send(errJson(0, "Message", "Bad message: ${e.message}").toString())
+            ws.send(errJson(0, "Message", "消息解析失败:${e.message}").toString())
         }
     }
 
@@ -109,27 +113,27 @@ class ButtplugServer(
             "StopDeviceCmd" -> {
                 ble.stopAll()
                 out.put(okJson(id))
-                onStatus("StopDeviceCmd -> both motors off")
+                onStatus("StopDeviceCmd -> 双马达已停止")
             }
 
             "StopAllDevices" -> {
                 ble.stopAll()
                 out.put(okJson(id))
-                onStatus("StopAllDevices -> both motors off")
+                onStatus("StopAllDevices -> 双马达已停止")
             }
 
-            else -> out.put(errJson(id, "Unknown", "Unsupported message type: $type"))
+            else -> out.put(errJson(id, "Unknown", "不支持的消息类型:$type"))
         }
     }
 
     private fun handleScalarCmd(body: JSONObject, id: Int, out: JSONArray) {
         if (!ble.ready) {
-            out.put(errJson(id, "Device", "Device not connected"))
+            out.put(errJson(id, "Device", "设备未连接"))
             return
         }
         val scalars = body.optJSONArray("Scalars")
         if (scalars == null || scalars.length() == 0) {
-            out.put(errJson(id, "Message", "ScalarCmd with no scalars"))
+            out.put(errJson(id, "Message", "ScalarCmd 缺少标量参数"))
             return
         }
         var ok = true
@@ -146,9 +150,9 @@ class ButtplugServer(
         }
         if (ok) {
             out.put(okJson(id))
-            onStatus("ScalarCmd applied")
+            onStatus("ScalarCmd 已执行")
         } else {
-            out.put(errJson(id, "Device", "BLE write failed"))
+            out.put(errJson(id, "Device", "BLE 写入失败"))
         }
     }
 

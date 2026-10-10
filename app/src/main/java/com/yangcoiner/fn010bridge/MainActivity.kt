@@ -17,8 +17,12 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
-    private var ble: BleManager? = null
-    private var server: ButtplugServer? = null
+
+    companion object {
+        // 进程级状态:Activity 重建(切后台/转屏)后服务器不会丢失,也不会重复绑定端口
+        @Volatile var ble: BleManager? = null
+        @Volatile var server: ButtplugServer? = null
+    }
 
     private val log = StringBuilder()
 
@@ -53,24 +57,37 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (hasPermissions()) startAll()
-        else Toast.makeText(this, "Bluetooth permissions are required", Toast.LENGTH_LONG).show()
+        else Toast.makeText(this, "需要蓝牙权限才能继续", Toast.LENGTH_LONG).show()
     }
 
     @SuppressLint("MissingPermission")
     private fun startAll() {
         val bt = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         if (bt.adapter == null) {
-            status("No Bluetooth adapter.")
+            status("未检测到蓝牙适配器。")
             return
         }
 
-        ble = BleManager(this) { msg -> runOnUiThread { status(msg) } }
-        ble!!.start()
+        if (server != null) {
+            status("服务器已在运行中(端口 12345),无需重复启动。")
+            return
+        }
 
-        server = ButtplugServer(12345, ble!!) { msg -> runOnUiThread { status(msg) } }
-        server!!.start()
+        val b = BleManager(this) { msg -> runOnUiThread { status(msg) } }
+        ble = b
+        b.start()
 
-        status("WebSocket server on 0.0.0.0:12345\nScanning for FN010-RX ...")
+        val srv = ButtplugServer(12345, b) { msg -> runOnUiThread { status(msg) } }
+        try {
+            srv.start()
+            server = srv
+        } catch (e: Exception) {
+            status("服务器启动失败:${e.message}\n请点「全部停止」后重试。")
+            b.shutdown()
+            ble = null
+        }
+
+        status("Buttplug 服务器已启动\n连接地址:ws://" + getLocalIp() + ":12345\n正在扫描 FN010-RX ...")
     }
 
     private fun stopAll() {
@@ -78,7 +95,7 @@ class MainActivity : AppCompatActivity() {
         server = null
         ble?.shutdown()
         ble = null
-        status("Stopped.")
+        status("已停止。")
     }
 
     private fun status(msg: String) {
@@ -87,3 +104,15 @@ class MainActivity : AppCompatActivity() {
         tvStatus.text = log.toString()
     }
 }
+
+    /** 获取手机在局域网中的 IPv4 地址(非回环)。 */
+    private fun getLocalIp(): String {
+        return try {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .flatMap { it.inetAddresses.toList() }
+                .firstOrNull { it is java.net.Inet4Address && !it.isLoopbackAddress }
+                ?.hostAddress ?: "<未连Wi-Fi>"
+        } catch (_: Exception) {
+            "<获取IP失败>"
+        }
+    }

@@ -56,11 +56,11 @@ class BleManager(
         val bt = context.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager
         val adapter = bt.adapter
         if (adapter == null || !adapter.isEnabled) {
-            onStatus("Bluetooth is off. Enable it and press Start again.")
+            onStatus("蓝牙未开启,请打开蓝牙后重试。")
             return
         }
         scanner = adapter.bluetoothLeScanner ?: run {
-            onStatus("LE scanner unavailable.")
+            onStatus("BLE 扫描器不可用。")
             return
         }
 
@@ -69,18 +69,18 @@ class BleManager(
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
         scanner?.startScan(listOf(filter), settings, scanCallback)
-        onStatus("Scanning for $DEVICE_NAME ...")
+        onStatus("正在扫描 $DEVICE_NAME ...")
     }
 
     private val scanCallback = object : android.bluetooth.le.ScanCallback() {
         override fun onScanResult(callbackType: Int, result: android.bluetooth.le.ScanResult) {
             scanner?.stopScan(this)
-            onStatus("Found ${result.device.address}, connecting ...")
+            onStatus("发现设备 ${result.device.address},正在连接 ...")
             connect(result.device)
         }
 
         override fun onScanFailed(errorCode: Int) {
-            onStatus("Scan failed: $errorCode")
+            onStatus("扫描失败:$errorCode")
         }
     }
 
@@ -96,30 +96,30 @@ class BleManager(
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    onStatus("BLE connected, discovering services ...")
+                    onStatus("BLE 已连接,正在发现服务 ...")
                     g.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     ready = false
-                    onStatus("BLE disconnected.")
+                    onStatus("BLE 已断开。")
                 }
             }
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                onStatus("Service discovery failed: $status")
+                onStatus("服务发现失败:$status")
                 return
             }
             val svc = g.getService(SVC_FFee)
             if (svc == null) {
-                onStatus("ffee service not found on this device.")
+                onStatus("未找到 ffee 服务,可能不是 FN010 设备。")
                 return
             }
             val w = svc.getCharacteristic(CH_WRITE)
             val n = svc.getCharacteristic(CH_NOTIF)
             if (w == null || n == null) {
-                onStatus("ee01/ee02 characteristics not found.")
+                onStatus("未找到 ee01/ee02 特征。")
                 return
             }
             writeChar = w
@@ -156,10 +156,10 @@ class BleManager(
         val ok = g.writeCharacteristic(w)
         if (ok) {
             ready = true
-            onStatus("Handshake sent. Device ready.")
+            onStatus("握手完成,设备就绪!")
             onReady?.invoke()
         } else {
-            onStatus("Handshake write failed.")
+            onStatus("握手发送失败。")
         }
     }
 
