@@ -57,7 +57,7 @@ class ButtplugServer(
         }.also { it.isDaemon = true; it.start() }
     }
 
-    fun stop() {
+    fun shutdownServer() {
         watchdog?.interrupt()
         watchdog = null
         try { super.stop(100) } catch (_: Exception) { try { super.stop() } catch (_: Exception) {} }
