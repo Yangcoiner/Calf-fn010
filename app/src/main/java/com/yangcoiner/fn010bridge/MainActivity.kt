@@ -29,12 +29,19 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        LogHelper.init(applicationContext)
 
         tvStatus = findViewById(R.id.tvStatus)
         findViewById<Button>(R.id.btnStart).setOnClickListener {
             if (hasPermissions()) startAll() else requestPerms()
         }
         findViewById<Button>(R.id.btnStop).setOnClickListener { stopAll() }
+        findViewById<Button>(R.id.btnExport).setOnClickListener { exportLog() }
+        findViewById<Button>(R.id.btnCopy).setOnClickListener {
+            val addr = "ws://" + getLocalIp() + ":12345"
+            copyAddr(addr + "\nws://127.0.0.1:12345")
+            Toast.makeText(this, "已复制局域网+本机两个地址", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun neededPerms(): Array<String> =
@@ -87,7 +94,12 @@ class MainActivity : AppCompatActivity() {
             ble = null
         }
 
-        status("Buttplug 服务器已启动\n连接地址:ws://" + getLocalIp() + ":12345\n正在扫描 FN010-RX ...")
+        val addr = "ws://" + getLocalIp() + ":12345"
+        copyAddr(addr)
+        status("Buttplug 服务器已启动(局域网地址已复制)\n" +
+               "局域网连接:$addr\n" +
+               "本机连接:ws://127.0.0.1:12345\n" +
+               "正在扫描 FN010-RX ...")
     }
 
     private fun stopAll() {
@@ -98,7 +110,29 @@ class MainActivity : AppCompatActivity() {
         status("已停止。")
     }
 
+    private fun exportLog() {
+        try {
+            val dir = java.io.File(getExternalFilesDir(null), "logs")
+            val f = java.io.File(dir, "fn010_log.txt")
+            if (!f.exists()) {
+                Toast.makeText(this, "暂无日志文件", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "com.yangcoiner.fn010bridge.fileprovider", f)
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(android.content.Intent.createChooser(intent, "导出调试日志"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "导出失败:${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun status(msg: String) {
+        LogHelper.log("APP", msg)
         log.append(msg).append('\n')
         if (log.length > 4000) log.delete(0, log.length - 4000)
         tvStatus.text = log.toString()
@@ -115,4 +149,9 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             "<获取IP失败>"
         }
+    }
+
+    private fun copyAddr(addr: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("fn010-ws", addr))
     }
