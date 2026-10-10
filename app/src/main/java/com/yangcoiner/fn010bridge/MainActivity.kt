@@ -74,7 +74,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopAll() {
-        server?.stopServer()
+        try { server?.stop() } catch (_: Exception) {}
         server = null
         ble?.shutdown()
         ble = null

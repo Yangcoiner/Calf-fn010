@@ -1,6 +1,7 @@
 package com.yangcoiner.fn010bridge
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
@@ -165,7 +166,7 @@ class BleManager(
     /** Map a 0.0..1.0 scalar to the 9-level speed byte (0 => stop). */
     fun speedFromScalar(scalar: Double): Int {
         if (scalar <= 0.001) return 0
-        val level = (Math.round(scalar * LEVELS)).coerceIn(1, LEVELS)
+        val level = (scalar * LEVELS).toInt().coerceIn(1, LEVELS)
         return BASE_SPEED + SPEED_STEP * (level - 1)
     }
 
