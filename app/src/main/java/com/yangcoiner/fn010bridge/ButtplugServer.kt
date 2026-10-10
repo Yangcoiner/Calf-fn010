@@ -25,18 +25,47 @@ class ButtplugServer(
         const val MESSAGE_VERSION = 3
         const val MAX_PING_TIME_MS = 30000
         const val SERVER_NAME = "FN010 Bridge"
+        /** 上游静默看门狗:超过该毫秒数没有任何上游指令(ScalarCmd),自动全停。Ping 不算。 */
+        const val IDLE_STOP_MS = 1000L
     }
 
     @Volatile
     private var client: WebSocket? = null
+    @Volatile private var lastCmdAt = 0L
+    @Volatile private var motorsRunning = false
+    private var watchdog: Thread? = null
 
     init {
         isReuseAddr = true
         connectionLostTimeout = 15
     }
 
+    /** 看门狗:有些游戏暂停/停止时只停发指令、不发停止包(FN010 是开环,会一直保持最后一档),
+     *  这里检测到上游静默超时就代发全停。 */
+    private fun startWatchdog() {
+        if (watchdog?.isAlive == true) return
+        watchdog = Thread {
+            while (!Thread.currentThread().isInterrupted) {
+                try { Thread.sleep(250) } catch (_: InterruptedException) { return@Thread }
+                if (motorsRunning && System.currentTimeMillis() - lastCmdAt > IDLE_STOP_MS) {
+                    motorsRunning = false
+                    ble.stopAll()
+                    onStatus("⚠ 上游 ${IDLE_STOP_MS / 1000.0}s 无指令(游戏可能未发停止包),已自动全停。")
+                    LogHelper.log("WS", "watchdog: idle > ${IDLE_STOP_MS}ms -> stopAll")
+                }
+            }
+        }.also { it.isDaemon = true; it.start() }
+    }
+
+    fun stop() {
+        watchdog?.interrupt()
+        watchdog = null
+        try { super.stop(100) } catch (_: Exception) { try { super.stop() } catch (_: Exception) {} }
+    }
+
     override fun onStart() {
         onStatus("Buttplug 服务器监听端口 $port")
+        startWatchdog()
     }
 
     override fun onOpen(ws: WebSocket, handshake: ClientHandshake) {
@@ -116,12 +145,14 @@ class ButtplugServer(
 
             "StopDeviceCmd" -> {
                 ble.stopAll()
+                motorsRunning = false
                 out.put(okJson(id))
                 onStatus("StopDeviceCmd -> 双马达已停止")
             }
 
             "StopAllDevices" -> {
                 ble.stopAll()
+                motorsRunning = false
                 out.put(okJson(id))
                 onStatus("StopAllDevices -> 双马达已停止")
             }
@@ -145,6 +176,7 @@ class ButtplugServer(
             val s = scalars.getJSONObject(i)
             val index = s.optInt("Index", 0)
             val scalar = s.optDouble("Scalar", 0.0).coerceIn(0.0, 1.0)
+            lastCmdAt = System.currentTimeMillis()
             val sent = when (index) {
                 0 -> ble.vibrate(scalar)
                 1 -> ble.oscillate(scalar)
@@ -153,6 +185,7 @@ class ButtplugServer(
             if (!sent) ok = false
         }
         if (ok) {
+            motorsRunning = true
             out.put(okJson(id))
             onStatus("ScalarCmd 已执行")
         } else {
