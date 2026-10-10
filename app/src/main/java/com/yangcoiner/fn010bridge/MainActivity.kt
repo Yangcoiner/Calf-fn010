@@ -18,9 +18,11 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
-    private lateinit var tvLevel: TextView
-    private var manualVib = false
-    private var manualOsc = false
+    private lateinit var tvVibLevel: TextView
+    private lateinit var tvOscLevel: TextView
+    // 上游响应开关:true = 该马达响应上游客户端(游戏/Intiface)请求;false = 屏蔽
+    private var vibGate = true
+    private var oscGate = true
     private var calibrating = false
 
     companion object {
@@ -35,8 +37,9 @@ class MainActivity : AppCompatActivity() {
         LogHelper.init(applicationContext)
 
         tvStatus = findViewById(R.id.tvStatus)
-        tvLevel = findViewById(R.id.tvLevel)
-        updateToggleUi()
+        tvVibLevel = findViewById(R.id.tvVibLevel)
+        tvOscLevel = findViewById(R.id.tvOscLevel)
+        paintGates()
 
         val toggle = findViewById<Button>(R.id.btnToggle)
         toggle.setOnClickListener {
@@ -51,35 +54,48 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "已复制局域网+本机两个地址", Toast.LENGTH_SHORT).show()
         }
 
-        // ---- 手动控制区 ----
-        val seek = findViewById<SeekBar>(R.id.seekLevel)
-        seek.max = 8 // 0..8 => 档位 1..9
-        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        // ---- 手动控制:震动/伸缩独立滑条(本地直发,不受上游开关限制) ----
+        val seekVib = findViewById<SeekBar>(R.id.seekVib)
+        seekVib.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                tvLevel.text = "档位:${progress + 1}"
+                tvVibLevel.text = if (progress == 0) "震动:关" else "震动:$progress 档"
                 val b = ble ?: return
-                if (manualVib) b.vibrate((progress + 1) / 9.0, manual = true)
-                if (manualOsc) b.oscillate((progress + 1) / 9.0, manual = true)
+                b.vibrate(progress / 9.0, manual = true)
+                LogHelper.log("MANUAL", "vib slider -> $progress")
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        val seekOsc = findViewById<SeekBar>(R.id.seekOsc)
+        seekOsc.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                tvOscLevel.text = if (progress == 0) "伸缩:关" else "伸缩:$progress 档"
+                val b = ble ?: return
+                b.oscillate(progress / 9.0, manual = true)
+                LogHelper.log("MANUAL", "osc slider -> $progress")
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
+        // ---- 上游响应开关:关掉后上游对该马达的指令一律不向蓝牙发送 ----
         findViewById<Button>(R.id.btnVib).setOnClickListener {
             val b = ble ?: run { toast("请先启动服务器并连接设备"); return@setOnClickListener }
-            manualVib = !manualVib
-            b.maskVib = manualVib // 遮罩:开启后上游客户端调不动震动马达
-            b.vibrate(if (manualVib) level() / 9.0 else 0.0, manual = true)
-            paintManual()
-            LogHelper.log("MANUAL", "vibration -> $manualVib (level ${level()}, mask=${b.maskVib})")
+            vibGate = !vibGate
+            b.maskVib = !vibGate
+            if (!vibGate) b.vibrate(0.0, manual = true) // 屏蔽时先停掉该马达
+            paintGates()
+            LogHelper.log("GATE", "vibration upstream -> $vibGate (mask=${b.maskVib})")
+            toast(if (vibGate) "震动:响应上游请求" else "震动:已屏蔽上游请求")
         }
         findViewById<Button>(R.id.btnOsc).setOnClickListener {
             val b = ble ?: run { toast("请先启动服务器并连接设备"); return@setOnClickListener }
-            manualOsc = !manualOsc
-            b.maskOsc = manualOsc // 遮罩:开启后上游客户端调不动伸缩马达
-            b.oscillate(if (manualOsc) level() / 9.0 else 0.0, manual = true)
-            paintManual()
-            LogHelper.log("MANUAL", "oscillation -> $manualOsc (level ${level()}, mask=${b.maskOsc})")
+            oscGate = !oscGate
+            b.maskOsc = !oscGate
+            if (!oscGate) b.oscillate(0.0, manual = true)
+            paintGates()
+            LogHelper.log("GATE", "oscillation upstream -> $oscGate (mask=${b.maskOsc})")
+            toast(if (oscGate) "伸缩:响应上游请求" else "伸缩:已屏蔽上游请求")
         }
 
         // ---- 校准:伸缩以 1 档低速运行 N 秒后自动停止,作为行程时间基准 ----
@@ -94,10 +110,8 @@ class MainActivity : AppCompatActivity() {
             Thread {
                 try { Thread.sleep((seconds * 1000).toLong()) } catch (_: Exception) {}
                 b.oscillate(0.0, manual = true)
-                manualOsc = false
                 runOnUiThread {
                     calibrating = false
-                    paintManual()
                     status("校准完成:伸缩低速运行 ${seconds}s 后已停(时长可长按校准钮调整)。")
                 }
                 LogHelper.log("CALIB", "done")
@@ -113,18 +127,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun level(): Int = findViewById<SeekBar>(R.id.seekLevel).progress + 1
-
     private fun getPrefs() = getSharedPreferences("fn010", Context.MODE_PRIVATE)
 
-    private fun paintManual() {
+    private fun paintGates() {
         val bv = findViewById<Button>(R.id.btnVib)
         val bo = findViewById<Button>(R.id.btnOsc)
-        bv.text = if (manualVib) "震动:开" else "只开震动"
-        bv.setBackgroundColor(if (manualVib) 0xFF1565C0.toInt() else 0xFF455A64.toInt())
+        bv.text = if (vibGate) "上游开" else "上游关"
+        bv.setBackgroundColor(if (vibGate) 0xFF1565C0.toInt() else 0xFFD32F2F.toInt())
         bv.setTextColor(0xFFFFFFFF.toInt())
-        bo.text = if (manualOsc) "伸缩:开" else "只开伸缩"
-        bo.setBackgroundColor(if (manualOsc) 0xFF6A1B9A.toInt() else 0xFF455A64.toInt())
+        bo.text = if (oscGate) "上游开" else "上游关"
+        bo.setBackgroundColor(if (oscGate) 0xFF6A1B9A.toInt() else 0xFFD32F2F.toInt())
         bo.setTextColor(0xFFFFFFFF.toInt())
     }
 
@@ -195,9 +207,9 @@ class MainActivity : AppCompatActivity() {
         server = null
         ble?.shutdown()
         ble = null
-        manualVib = false
-        manualOsc = false
-        paintManual()
+        vibGate = true
+        oscGate = true
+        paintGates()
         status("已停止。")
         updateToggleUi()
     }
