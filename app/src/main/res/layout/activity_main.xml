@@ -46,7 +46,7 @@
         android:id="@+id/seekVib"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:max="9"
+        android:max="100"
         android:progress="0" />
 
     <LinearLayout
@@ -86,7 +86,7 @@
         android:id="@+id/seekOsc"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:max="9"
+        android:max="100"
         android:progress="0" />
 
     <LinearLayout

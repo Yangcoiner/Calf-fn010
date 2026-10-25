@@ -58,9 +58,9 @@ class MainActivity : AppCompatActivity() {
         val seekVib = findViewById<SeekBar>(R.id.seekVib)
         seekVib.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                tvVibLevel.text = if (progress == 0) "震动:关" else "震动:$progress 档"
+                tvVibLevel.text = formatLevel("震动", progress)
                 val b = ble ?: return
-                b.vibrate(progress / 9.0, manual = true)
+                b.vibrate(progress / BleManager.LEVELS.toDouble(), manual = true)
                 LogHelper.log("MANUAL", "vib slider -> $progress")
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -69,9 +69,9 @@ class MainActivity : AppCompatActivity() {
         val seekOsc = findViewById<SeekBar>(R.id.seekOsc)
         seekOsc.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                tvOscLevel.text = if (progress == 0) "伸缩:关" else "伸缩:$progress 档"
+                tvOscLevel.text = formatLevel("伸缩", progress)
                 val b = ble ?: return
-                b.oscillate(progress / 9.0, manual = true)
+                b.oscillate(progress / BleManager.LEVELS.toDouble(), manual = true)
                 LogHelper.log("MANUAL", "osc slider -> $progress")
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -106,7 +106,7 @@ class MainActivity : AppCompatActivity() {
             val seconds = getPrefs().getFloat("calib_seconds", 3.0f)
             Toast.makeText(this, "校准中:1档伸缩 ${seconds}s 后自动停止...", Toast.LENGTH_SHORT).show()
             LogHelper.log("CALIB", "start ${seconds}s @ level 1")
-            b.oscillate(1.0 / 9, manual = true)
+            b.oscillate(1.0 / BleManager.LEVELS, manual = true)
             Thread {
                 try { Thread.sleep((seconds * 1000).toLong()) } catch (_: Exception) {}
                 b.oscillate(0.0, manual = true)
@@ -128,6 +128,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getPrefs() = getSharedPreferences("fn010", Context.MODE_PRIVATE)
+
+    /**
+     * 速度显示: level 0..100 连续。
+     * 同时给出「十分制档位」便于和旧文档对照 —— 例如 level 50 显示为 "50 (5.0/10)"。
+     */
+    private fun formatLevel(name: String, level: Int): String {
+        if (level <= 0) return "$name:关"
+        val tenth = level / 10.0
+        return "$name:$level (${"%.1f".format(tenth)}/10)"
+    }
 
     private fun paintGates() {
         val bv = findViewById<Button>(R.id.btnVib)

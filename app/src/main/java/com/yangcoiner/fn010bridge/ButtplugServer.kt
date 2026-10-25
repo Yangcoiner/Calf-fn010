@@ -158,7 +158,7 @@ class ButtplugServer(
 
     /**
      * v4 输出指令: OutputCmd { DeviceIndex, FeatureIndex, Command: { Vibrate: { Value } } }
-     * Value 是绝对档位值（0..9），不是比例。
+     * Value 是绝对 level（0..100），不是比例。
      */
     private fun handleOutputCmd(body: JSONObject, id: Int, out: JSONArray) {
         if (!ble.ready) {
@@ -241,6 +241,9 @@ class ButtplugServer(
     /**
      * v4 设备条目: DeviceFeatures 是 map（feature index -> feature）。
      * Output 也是 map: { "Vibrate": { "Value": [min, max] } }
+     *
+     * Value 范围用 0..100 (不是 0..9): HCI 抓包证明设备支持 0..100 连续调速,
+     * 声明成 0..9 会白白丢掉 10 倍分辨率, 慢速段落无法精确还原。
      */
     private fun deviceObj(): JSONObject {
         val vibrateOutput = JSONObject()
