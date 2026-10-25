@@ -11,8 +11,8 @@ import java.net.InetSocketAddress
  * Buttplug 协议服务器 —— 消息规范 v4 (Buttplug Message Spec v4)。
  *
  * 暴露一台设备 (index 0, "FN010-RX")，两个 Output 特性:
- *   FeatureIndex 0: Vibrate   (档位 0..9)
- *   FeatureIndex 1: Oscillate (档位 0..9)
+ *   FeatureIndex 0: Vibrate   (level 0..100, 0 = 停)
+ *   FeatureIndex 1: Oscillate (level 0..100, 0 = 停)
  *
  * ── 为什么必须是 v4 ──────────────────────────────────────────────────────
  * 新版 FunFlixDroid 内置 intiface-engine v4，只说 Buttplug 规范 v4。
@@ -28,7 +28,8 @@ import java.net.InetSocketAddress
  *   6. **所有出站消息必须包在 JSON 数组里** —— 规范要求单元素数组包裹，
  *      客户端直接对结果做迭代，发裸对象会抛 TypeError
  *
- * v4 的 Value 是绝对档位值（0..9），不是 v3 那种 0.0~1.0 的比例值。
+ * v4 的 Value 是绝对 level（0..100），不是 v3 那种 0.0~1.0 的比例值。
+ * level 0 表示停止（发 on/off=0），1..100 映射到实测速度字节。
  */
 class ButtplugServer(
     port: Int,

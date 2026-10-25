@@ -55,45 +55,43 @@ class BleManager(
         const val MOTOR_VIBRATION = 0x01
         const val MOTOR_OSCILLATION = 0x03
 
-        /** 连续 level 上限 (0..100)。0 不表示停, 停由 on/off 字节表示。 */
+        /** 连续 level 上限 (0..100)。level 0 = 停(不发速度字节)。 */
         const val LEVELS = 100
 
-        /** 震动实测档位表 (10 点, 步长 25), HCI 抓包实证。 */
+        /**
+         * 震动速度锚点表 (10 点), HCI 抓包实证。
+         * 这是厂商 App 的 10 档, 索引 0=最慢 .. 9=最快, 覆盖 level 1..100。
+         */
         val VIB_TABLE = intArrayOf(
             0x1F, 0x38, 0x51, 0x6A, 0x83, 0x9C, 0xB5, 0xCE, 0xE7, 0xFF
         )
 
-        /** 伸缩实测档位表 (9 点, 步长 22.5), HCI 抓包实证。 */
+        /**
+         * 伸缩速度锚点表 (10 点), HCI 抓包实证。
+         * 前 9 点是厂商 App 的伸缩链 (0x35 + 22.5k), 末点 0xFF 与震动同速上限。
+         */
         val OSC_TABLE = intArrayOf(
-            0x35, 0x4B, 0x62, 0x78, 0x8F, 0xA5, 0xBC, 0xD2, 0xE9
+            0x35, 0x4B, 0x62, 0x78, 0x8F, 0xA5, 0xBC, 0xD2, 0xE9, 0xFF
         )
 
         /**
-         * 按实测表把 0..100 的 level 映射到速度字节。
-         * 表内是锚点, 中间做线性插值 —— 固件支持连续量, 插值出的值也有效。
+         * 按锚点表把 level(1..100) 映射到速度字节, 中间线性插值。
          *
-         * @param table       实测档位表
-         * @param level       目标 level (0..100)
-         * @param anchorStep  相邻锚点对应的 level 间隔
-         *                    震动 = 100/9 (锚点 0,11,22,...,100), 伸缩 = 10 (锚点 10,20,...,90)
+         * @param table  锚点表, 索引 0=最慢
+         * @param level  目标 level (0..100); 0 表示停止, 返回 0
          */
-        fun speedFromTable(table: IntArray, level: Int, anchorStep: Float): Int {
+        fun speedFromTable(table: IntArray, level: Int): Int {
             val lv = level.coerceIn(0, LEVELS)
-            if (lv == 0) return table[0]
+            if (lv == 0) return 0            // level 0 = 停
             val n = table.size
-            val pos = lv / anchorStep
+            // 10 个锚点铺满 level 1..100
+            val pos = (lv - 1) * (n - 1).toDouble() / (LEVELS - 1).toDouble()
             val i = pos.toInt().coerceIn(0, n - 2)
             val frac = pos - i
             val lo = table[i]
             val hi = table[i + 1]
             return (lo + (hi - lo) * frac).toInt().coerceIn(1, 0xFF)
         }
-
-        /** 震动锚点间隔: 10 个锚点覆盖 level 0..100。 */
-        const val VIB_ANCHOR_STEP = 100f / 9f
-
-        /** 伸缩锚点间隔: 9 个锚点覆盖 level 10..90。 */
-        const val OSC_ANCHOR_STEP = 10f
 
         val SVC_FFee = UUID.fromString("0000ffee-0000-1000-8000-00805f9b34fb")
         val CH_WRITE = UUID.fromString("0000ee01-0000-1000-8000-00805f9b34fb")
@@ -276,21 +274,21 @@ class BleManager(
         }
     }
 
-    /** 0.0..1.0 比例 -> 速度字节(震动)。 */
+    /** 0.0..1.0 比例 -> 速度字节(震动)。0 = 停。 */
     fun speedFromScalar(scalar: Double): Int =
-        speedFromTable(VIB_TABLE, (scalar * LEVELS).toInt().coerceIn(0, LEVELS), VIB_ANCHOR_STEP)
+        speedFromTable(VIB_TABLE, (scalar * LEVELS).toInt().coerceIn(0, LEVELS))
 
-    /** 0.0..1.0 比例 -> 速度字节(伸缩)。 */
+    /** 0.0..1.0 比例 -> 速度字节(伸缩)。0 = 停。 */
     fun oscSpeedFromScalar(scalar: Double): Int =
-        speedFromTable(OSC_TABLE, (scalar * LEVELS).toInt().coerceIn(0, LEVELS), OSC_ANCHOR_STEP)
+        speedFromTable(OSC_TABLE, (scalar * LEVELS).toInt().coerceIn(0, LEVELS))
 
-    /** 绝对 level(0..100) -> 速度字节(震动)。 */
+    /** 绝对 level(0..100) -> 速度字节(震动)。0 = 停。 */
     fun speedFromLevel(level: Int): Int =
-        speedFromTable(VIB_TABLE, level.coerceIn(0, LEVELS), VIB_ANCHOR_STEP)
+        speedFromTable(VIB_TABLE, level.coerceIn(0, LEVELS))
 
-    /** 绝对 level(0..100) -> 速度字节(伸缩)。 */
+    /** 绝对 level(0..100) -> 速度字节(伸缩)。0 = 停。 */
     fun oscSpeedFromLevel(level: Int): Int =
-        speedFromTable(OSC_TABLE, level.coerceIn(0, LEVELS), OSC_ANCHOR_STEP)
+        speedFromTable(OSC_TABLE, level.coerceIn(0, LEVELS))
 
     private var lastVibFrame: ByteArray? = null
     private var lastOscFrame: ByteArray? = null
