@@ -223,6 +223,12 @@ class BleManager(
         return BASE_SPEED + SPEED_STEP * (level - 1)
     }
 
+    /** Map an absolute level (0..9) to the speed byte (0 => stop). Buttplug v4 uses absolute levels. */
+    fun speedFromLevel(level: Int): Int {
+        if (level <= 0) return 0
+        return BASE_SPEED + SPEED_STEP * (level.coerceIn(1, LEVELS) - 1)
+    }
+
     private var lastVibFrame: ByteArray? = null
     private var lastOscFrame: ByteArray? = null
 
@@ -250,6 +256,23 @@ class BleManager(
         if (!manual && maskVib) return true
         val s = speedFromScalar(scalar)
         return send(MOTOR_VIBRATION, s > 0, s)
+    }
+
+    /**
+     * Buttplug v4 的 OutputCmd 用绝对档位 (0..9),不是 0.0~1.0 比例。
+     * 上游指令(manual=false)同样受遮罩开关约束。
+     */
+    fun vibrateLevel(level: Int, manual: Boolean = false): Boolean {
+        if (!manual && maskVib) return true
+        val s = speedFromLevel(level)
+        return send(MOTOR_VIBRATION, s > 0, s)
+    }
+
+    /** Buttplug v4 的 OutputCmd 用绝对档位 (0..9),不是 0.0~1.0 比例。 */
+    fun oscillateLevel(level: Int, manual: Boolean = false): Boolean {
+        if (!manual && maskOsc) return true
+        val s = speedFromLevel(level)
+        return send(MOTOR_OSCILLATION, s > 0, s)
     }
 
     fun oscillate(scalar: Double, manual: Boolean = false): Boolean {

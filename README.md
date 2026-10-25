@@ -13,13 +13,18 @@ intiface/intiface-central#297 and buttplugio/buttplug#968.
 
 ## Features
 
-- Buttplug JSON protocol, MessageVersion 3 (`RequestServerInfo`,
-  `RequestDeviceList`, `StartScanning`, `ScalarCmd`, `StopDeviceCmd`,
-  `StopAllDevices`, `Ping`)
-- One device exposed: `FN010-RX` with two scalar features:
-  - Index 0: **Vibrate** (9 steps)
-  - Index 1: **Oscillate** (9 steps)
+- Buttplug JSON protocol, **Message Spec v4** (`RequestServerInfo`,
+  `RequestDeviceList`, `StartScanning`, `OutputCmd`, `StopCmd`, `Ping`)
+- One device exposed: `FN010-RX` with two output features:
+  - FeatureIndex 0: **Vibrate** (levels 0..9)
+  - FeatureIndex 1: **Oscillate** (levels 0..9)
 - Motors are force-stopped when the last client disconnects
+
+> **Note on protocol version**: this server speaks Buttplug **message spec v4**,
+> which is what current FunFlixDroid (built-in intiface-engine v4) and
+> Intiface Central v3+ expect. An earlier v3-based build showed as *connected
+> but with an empty device list* in those clients. See `V4_MIGRATION.md`
+> for the full diagnosis and the v3 → v4 field mapping.
 
 ## Usage
 
@@ -57,11 +62,16 @@ MIT
 
 ### 功能
 
-- Buttplug JSON 协议,MessageVersion 3(`RequestServerInfo`、`RequestDeviceList`、`StartScanning`、`ScalarCmd`、`StopDeviceCmd`、`StopAllDevices`、`Ping`)
-- 暴露一台设备 `FN010-RX`,两个标量特性:
-  - Index 0:**震动**(9 档)
-  - Index 1:**伸缩**(9 档)
+- Buttplug JSON 协议,**消息规范 v4**(`RequestServerInfo`、`RequestDeviceList`、`StartScanning`、`OutputCmd`、`StopCmd`、`Ping`)
+- 暴露一台设备 `FN010-RX`,两个输出特性:
+  - FeatureIndex 0:**震动**(档位 0..9)
+  - FeatureIndex 1:**伸缩**(档位 0..9)
 - 最后一个客户端断开时自动停止马达
+
+> **协议版本说明**:本服务器使用 Buttplug **消息规范 v4**,这是新版 FunFlixDroid
+> (内置 intiface-engine v4)和 Intiface Central v3+ 所使用的版本。
+> 早期基于 v3 的版本在这些客户端里会表现为「connected 但 Devices 列表为空」。
+> 完整诊断与 v3 → v4 字段对照见 `V4_MIGRATION.md`。
 
 ### 使用方法
 
