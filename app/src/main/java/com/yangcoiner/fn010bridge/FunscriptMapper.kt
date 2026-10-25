@@ -157,7 +157,7 @@ class FunscriptMapper(
         val alpha = 1.0 - Math.pow(0.5, dt / tau)
         envelope += (v - envelope) * alpha
 
-        val vibLevel = (Math.round(envelope * maxLevel)).coerceIn(0, maxLevel).toInt()
+        val vibLevel = Math.round(envelope * maxLevel).toInt().coerceIn(0, maxLevel)
         val oscLevel = if (inHold) 0 else levelForFrequency(frequencyHz)
 
         lastVibLevel = vibLevel
