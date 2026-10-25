@@ -16,15 +16,23 @@ intiface/intiface-central#297 and buttplugio/buttplug#968.
 - Buttplug JSON protocol, **Message Spec v4** (`RequestServerInfo`,
   `RequestDeviceList`, `StartScanning`, `OutputCmd`, `StopCmd`, `Ping`)
 - One device exposed: `FN010-RX` with two output features:
-  - FeatureIndex 0: **Vibrate** (levels 0..9)
-  - FeatureIndex 1: **Oscillate** (levels 0..9)
+  - FeatureIndex 0: **Vibrate** (level 0..100)
+  - FeatureIndex 1: **Oscillate** (level 0..100)
 - Motors are force-stopped when the last client disconnects
 
-> **Note on protocol version**: this server speaks Buttplug **message spec v4**,
-> which is what current FunFlixDroid (built-in intiface-engine v4) and
-> Intiface Central v3+ expect. An earlier v3-based build showed as *connected
-> but with an empty device list* in those clients. See `V4_MIGRATION.md`
-> for the full diagnosis and the v3 → v4 field mapping.
+> **Protocol version**: this server speaks Buttplug **message spec v4**, which is
+> what current FunFlixDroid (built-in intiface-engine v4) and Intiface Central
+> v3+ expect. An earlier v3-based build showed as *connected but with an empty
+> device list* in those clients.
+
+> **Speed resolution**: the device accepts **0..100 continuous levels**, not 9
+> discrete gears. This was confirmed by HCI capture analysis — see
+> `HCI_ANALYSIS.md`. The feature `Value` range is therefore declared as
+> `[0, 100]` so clients keep the full resolution.
+
+> **Funscript support**: since the hardware only accepts speed (no position
+> actuator), funscript position tracks are mapped by *rhythm* rather than by
+> position — see `FUNSCRIPT_MAPPING.md`.
 
 ## Usage
 
@@ -64,14 +72,21 @@ MIT
 
 - Buttplug JSON 协议,**消息规范 v4**(`RequestServerInfo`、`RequestDeviceList`、`StartScanning`、`OutputCmd`、`StopCmd`、`Ping`)
 - 暴露一台设备 `FN010-RX`,两个输出特性:
-  - FeatureIndex 0:**震动**(档位 0..9)
-  - FeatureIndex 1:**伸缩**(档位 0..9)
+  - FeatureIndex 0:**震动**(level 0..100)
+  - FeatureIndex 1:**伸缩**(level 0..100)
 - 最后一个客户端断开时自动停止马达
 
-> **协议版本说明**:本服务器使用 Buttplug **消息规范 v4**,这是新版 FunFlixDroid
+> **协议版本**:本服务器使用 Buttplug **消息规范 v4**,这是新版 FunFlixDroid
 > (内置 intiface-engine v4)和 Intiface Central v3+ 所使用的版本。
 > 早期基于 v3 的版本在这些客户端里会表现为「connected 但 Devices 列表为空」。
-> 完整诊断与 v3 → v4 字段对照见 `V4_MIGRATION.md`。
+> 详见 `V4_MIGRATION.md`。
+
+> **速度分辨率**:设备实际支持 **0..100 连续调速**,不是 9 个离散档位。
+> 这一点由 HCI 抓包分析确认,详见 `HCI_ANALYSIS.md`。
+> 因此特性的 `Value` 范围声明为 `[0, 100]`,让客户端保留完整分辨率。
+
+> **funscript 支持**:由于硬件只有速度控制(无位置执行器),
+> funscript 的位置轨迹按**节律**而非位置映射,详见 `FUNSCRIPT_MAPPING.md`。
 
 ### 使用方法
 
