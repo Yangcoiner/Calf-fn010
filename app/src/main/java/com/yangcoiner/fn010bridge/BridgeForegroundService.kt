@@ -29,6 +29,10 @@ import android.os.IBinder
 class BridgeForegroundService : Service() {
 
     companion object {
+        /** 服务当前是否活着。用来发现"保活被系统清掉了"并补一次。 */
+        @Volatile
+        var running: Boolean = false
+
         const val CHANNEL_ID = "fn010_bridge"
         const val NOTI_ID = 1001
         const val ACTION_START = "com.yangcoiner.fn010bridge.START"
@@ -70,8 +74,10 @@ class BridgeForegroundService : Service() {
         }
         try {
             startForeground(NOTI_ID, buildNotification())
+            running = true
             LogHelper.log("SVC", "前台服务已启动(常驻通知已挂)")
         } catch (e: Exception) {
+            running = false
             LogHelper.log("SVC", "前台服务启动失败: ${e.javaClass.simpleName} ${e.message}")
             // Android 14 对 connectedDevice 类型要求蓝牙权限已授权;
             // 权限没给时 startForeground 会抛 SecurityException。
@@ -94,6 +100,7 @@ class BridgeForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         LogHelper.log("SVC", "前台服务已销毁")
         try {
             stopForeground(true)

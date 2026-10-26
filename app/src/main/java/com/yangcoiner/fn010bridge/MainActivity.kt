@@ -249,8 +249,22 @@ class MainActivity : AppCompatActivity() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (hasPermissions()) startAll()
-        else Toast.makeText(this, "需要蓝牙权限才能继续", Toast.LENGTH_LONG).show()
+        when (requestCode) {
+            // 通知权限: 结果只影响保活强度, 不拦流程
+            1001 -> {
+                val ok = grantResults.isNotEmpty() &&
+                        grantResults[0] == PackageManager.PERMISSION_GRANTED
+                LogHelper.log("BG", "通知权限申请结果=${if (ok) "已授予" else "被拒绝"}")
+                if (!ok) {
+                    status("通知权限被拒绝。前台服务没有可见通知, 部分系统会把它清掉," +
+                            "表现就是保活一阵后失效、播放器显示客户端下线。")
+                }
+            }
+            else -> {
+                if (hasPermissions()) startAll()
+                else Toast.makeText(this, "需要蓝牙权限才能继续", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -291,6 +305,8 @@ class MainActivity : AppCompatActivity() {
         LogHelper.log("ENV", "详细报文=${if (LogHelper.verbose) "开" else "关"} " +
                 "日志文件=${LogHelper.fileSizeKb()}KB")
         logBgStatus()
+
+        ensureNotifyPermission()
 
         acquireNetLocks()
         // 前台服务: 熄屏后不让系统冻结进程(socket 被冻结时对端会收到 RST)
@@ -430,7 +446,17 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // Wi-Fi 切换后 IP 会变, 回到界面时刷新一下
-        if (server != null) showAddr()
+        if (server != null) {
+            showAddr()
+            // 保活被系统清掉时补一次: 服务没了 -> 前台服务状态失效 -> 极易被冻结
+            if (!BridgeForegroundService.running) {
+                LogHelper.log("SVC", "检测到前台服务已不在, 重新拉起")
+                try {
+                    BridgeForegroundService.start(this)
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     private fun copyAddr(addr: String) {
@@ -447,6 +473,32 @@ class MainActivity : AppCompatActivity() {
                 ?.hostAddress ?: "<未连Wi-Fi>"
         } catch (_: Exception) {
             "<获取IP失败>"
+        }
+    }
+
+    /**
+     * 申请通知权限。
+     *
+     * 为什么这一步决定保活成不成立:
+     * Android 13+ 如果没有 POST_NOTIFICATIONS, 前台服务的通知不会显示,
+     * 服务本身"技术上"还在, 但 vivo/小米这类 ROM 会认为
+     * "没有可见通知的前台服务"是异常的, 直接把它清掉或者降级成普通后台服务。
+     * 表现就是: 保活生效一次, 之后又没了, 播放器显示客户端已下线。
+     */
+    private fun ensureNotifyPermission() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val granted = ContextCompat.checkSelfPermission(
+            this, "android.permission.POST_NOTIFICATIONS"
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            LogHelper.log("BG", "通知权限=已有, 前台服务通知可见")
+            return
+        }
+        LogHelper.log("BG", "通知权限=缺失, 正在申请(不给我, 保活会被 ROM 清掉)")
+        try {
+            requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1001)
+        } catch (e: Exception) {
+            LogHelper.log("BG", "申请通知权限失败: ${e.message}")
         }
     }
 
