@@ -27,15 +27,59 @@ class MainActivity : AppCompatActivity() {
     private var oscGate = true
     private var calibrating = false
 
-    // 熄屏后 Wi-Fi 会进省电模式(甚至直接断), 安卓还会把后台应用冻住。
-    // 没有这两个锁, WebSocket 会莫名其妙断 —— 这是"总断开"的第二个原因。
-    private var wifiLock: WifiManager.WifiLock? = null
-    private var cpuLock: PowerManager.WakeLock? = null
+    // 锁放在 companion object: 服务器本身是进程级保留的,
+    // 锁如果挂在 Activity 实例上, 转屏重建后旧实例的锁没人释放,
+    // 新实例又会再拿一把 —— 既泄漏又释放不掉。
 
     companion object {
         // 进程级状态:Activity 重建(切后台/转屏)后服务器不会丢失,也不会重复绑定端口
         @Volatile var ble: BleManager? = null
         @Volatile var server: ButtplugServer? = null
+
+        // 熄屏后 Wi-Fi 会进省电模式(甚至直接断), 安卓还会把后台应用冻住。
+        // 没有这两个锁, WebSocket 会莫名其妙断。
+        @Volatile private var wifiLock: WifiManager.WifiLock? = null
+        @Volatile private var cpuLock: PowerManager.WakeLock? = null
+
+        /**
+         * 拿住 Wi-Fi 高性能锁 + CPU 部分唤醒锁, 直到停止服务。
+         *
+         * Wi-Fi 锁: 防止熄屏后 Wi-Fi 进 power-save / 被断开
+         * CPU 锁:   防止熄屏后 CPU 休眠导致 socket 超时
+         * 两者都只在服务器运行期间持有, 停止时立即释放。
+         */
+        @SuppressLint("WakelockTimeout")
+        fun acquireLocks(ctx: Context, onMsg: (String) -> Unit) {
+            try {
+                if (wifiLock == null) {
+                    val wm = ctx.applicationContext
+                        .getSystemService(Context.WIFI_SERVICE) as WifiManager
+                    wifiLock = wm.createWifiLock(
+                        WifiManager.WIFI_MODE_FULL_HIGH_PERF, "fn010:bridge"
+                    ).apply { setReferenceCounted(false); acquire() }
+                }
+            } catch (e: Exception) {
+                onMsg("Wi-Fi 锁获取失败:${e.message}")
+            }
+            try {
+                if (cpuLock == null) {
+                    val pm = ctx.applicationContext
+                        .getSystemService(Context.POWER_SERVICE) as PowerManager
+                    cpuLock = pm.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK, "fn010:cpu"
+                    ).apply { setReferenceCounted(false); acquire() }
+                }
+            } catch (e: Exception) {
+                onMsg("唤醒锁获取失败:${e.message}")
+            }
+        }
+
+        fun releaseLocks() {
+            try { wifiLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
+            wifiLock = null
+            try { cpuLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
+            cpuLock = null
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -211,6 +255,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         acquireNetLocks()
+        // 前台服务: 熄屏后不让系统冻结进程(socket 被冻结时对端会收到 RST)
+        try {
+            BridgeForegroundService.start(this)
+        } catch (e: Exception) {
+            status("前台服务启动失败(可能缺少通知权限):${e.message}")
+        }
 
         val addr = "ws://" + getLocalIp() + ":12345"
         copyAddr(addr)
@@ -224,6 +274,10 @@ class MainActivity : AppCompatActivity() {
     private fun stopAll() {
         try { server?.stop() } catch (_: Exception) {}
         server = null
+        try {
+            BridgeForegroundService.stop(this)
+        } catch (_: Exception) {
+        }
         releaseNetLocks()
         ble?.shutdown()
         ble = null
@@ -241,43 +295,9 @@ class MainActivity : AppCompatActivity() {
      * CPU 锁:   防止熄屏后 CPU 休眠导致 socket 超时
      * 两个都是「只在服务器运行期间持有」, 停止时立刻释放, 不影响平时待机。
      */
-    @SuppressLint("WakelockTimeout")
-    private fun acquireNetLocks() {
-        try {
-            if (wifiLock == null) {
-                val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                wifiLock = wm.createWifiLock(
-                    WifiManager.WIFI_MODE_FULL_HIGH_PERF, "fn010:bridge"
-                ).apply { setReferenceCounted(false); acquire() }
-            }
-        } catch (e: Exception) {
-            status("Wi-Fi 锁获取失败:${e.message}")
-        }
-        try {
-            if (cpuLock == null) {
-                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-                cpuLock = pm.newWakeLock(
-                    PowerManager.PARTIAL_WAKE_LOCK, "fn010:cpu"
-                ).apply { setReferenceCounted(false); acquire() }
-            }
-        } catch (e: Exception) {
-            status("唤醒锁获取失败:${e.message}")
-        }
-    }
+    private fun acquireNetLocks() = acquireLocks(applicationContext) { status(it) }
 
-    private fun releaseNetLocks() {
-        try { wifiLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
-        wifiLock = null
-        try { cpuLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
-        cpuLock = null
-    }
-
-    override fun onDestroy() {
-        // Activity 销毁时服务器是进程级保留的, 这里只解 Activity 自己的东西;
-        // 若服务器已被停掉则锁早就释放过了。
-        if (server == null) releaseNetLocks()
-        super.onDestroy()
-    }
+    private fun releaseNetLocks() = releaseLocks()
 
     private fun updateToggleUi() {
         val btn = findViewById<Button>(R.id.btnToggle)
