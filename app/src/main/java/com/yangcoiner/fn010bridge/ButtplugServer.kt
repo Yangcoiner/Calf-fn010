@@ -239,6 +239,11 @@ class ButtplugServer(
                         val idle = (System.currentTimeMillis() - last) / 1000.0
                         val sinceCmd = if (lastCmdAt > 0)
                             (System.currentTimeMillis() - lastCmdAt) / 1000.0 else -1.0
+                        BridgeForegroundService.update(
+                            "已连接 · FN010-RX",
+                            "指令 $cmdCount 条 · 在线 ${String.format("%.0f", alive)}s\n" +
+                            (if (ws.isOpen) "socket 正常" else "socket 已关闭")
+                        )
                         LogHelper.log("STAT",
                             "在线=${String.format("%.0f", alive)}s 指令=$cmdCount 回Ok=$pongCount " +
                             "空闲=${String.format("%.0f", idle)}s 距最后指令=${String.format("%.0f", sinceCmd)}s " +
@@ -288,6 +293,10 @@ class ButtplugServer(
         lastCmdSummary = ""
         lastLevel = -1
         onStatus("客户端已连接:${ws.remoteSocketAddress}")
+        BridgeForegroundService.update(
+            "已连接 · FN010-RX",
+            "客户端 ${ws.remoteSocketAddress}\n监听 ${"0.0.0.0"}:$port"
+        )
         LogHelper.section("新会话 ${ws.remoteSocketAddress}")
         LogHelper.log("APP", "会话开始 ping间隔=${PING_INTERVAL_MS}ms 版本协商前")
     }
@@ -342,6 +351,10 @@ class ButtplugServer(
             checkListener()
         } catch (_: Exception) {
         }
+        BridgeForegroundService.update(
+            "等待重连 · FN010-RX",
+            "上次断开：$reasonText（code=$code, $alive 秒）\n端口 $port 仍在监听"
+        )
         LogHelper.log("APP", "会话结束 code=$code remote=$remote reason=$reasonText 判定=$verdict " +
                 "时长=${String.format("%.1f", alive)}s 收包=$msgCount 指令=$cmdCount 回Ok=$pongCount " +
                 "静默=${String.format("%.1f", idle)}s 最后指令=${lastCmdSummary.ifEmpty { "无" }}")

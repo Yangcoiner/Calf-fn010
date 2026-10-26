@@ -319,6 +319,10 @@ class MainActivity : AppCompatActivity() {
         val addr = "ws://" + getLocalIp() + ":12345"
         copyAddr(addr)
         showAddr()
+        BridgeForegroundService.update(
+            "服务器运行中 · FN010-RX",
+            "地址 $addr\n本机 ws://127.0.0.1:12345\n等待播放器连接"
+        )
         status("Buttplug 服务器已启动(局域网地址已复制)\n" +
                "局域网连接:$addr\n" +
                "本机连接:ws://127.0.0.1:12345\n" +
@@ -340,6 +344,7 @@ class MainActivity : AppCompatActivity() {
         oscGate = true
         paintGates()
         restartCount = 0
+        BridgeForegroundService.update("已停止", "服务器未运行")
         tvAddr.text = "未启动"
         status("已停止。")
         updateToggleUi()
@@ -433,8 +438,7 @@ class MainActivity : AppCompatActivity() {
     /** 把连接地址常驻显示在界面上(不靠剪贴板), 点一下可复制。 */
     private fun showAddr() {
         if (server == null) {
-            restartCount = 0
-        tvAddr.text = "未启动"
+            tvAddr.text = "未启动"
             return
         }
         val ip = getLocalIp()
