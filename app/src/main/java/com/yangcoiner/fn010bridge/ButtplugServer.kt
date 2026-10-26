@@ -101,6 +101,9 @@ class ButtplugServer(
     @Volatile private var pongCount = 0
     @Volatile private var lastCmdAt = 0L
     @Volatile private var lastCmdSummary = ""
+
+    /** 最后一条 OutputCmd 的档位(0..100)。0 = 客户端主动归零。 */
+    @Volatile private var lastLevel = -1
     @Volatile private var statsTick = 0
 
     init {
@@ -231,6 +234,7 @@ class ButtplugServer(
         pongCount = 0
         lastCmdAt = 0L
         lastCmdSummary = ""
+        lastLevel = -1
         onStatus("客户端已连接:${ws.remoteSocketAddress}")
         LogHelper.section("新会话 ${ws.remoteSocketAddress}")
         LogHelper.log("APP", "会话开始 ping间隔=${PING_INTERVAL_MS}ms 版本协商前")
@@ -257,7 +261,16 @@ class ButtplugServer(
             else -> "其他"
         }
         onStatus("客户端断开 ($code),马达已自动停止。")
-        LogHelper.log("APP", "会话结束 code=$code remote=$remote reason=$reasonText " +
+        // 判定: 客户端在断开前有没有把档位归零。
+        //  归零 -> 大概率是用户停止播放/退出播放器, 属正常流程
+        //  没归零 -> 播放中途掉线, 这才是需要排查的
+        val verdict = when {
+            code == 1000 && lastLevel == 0 -> "疑似正常停止(客户端先归零再关闭)"
+            code == 1000 -> "播放中断开(最后档位=$lastLevel, 未归零)"
+            code == 1006 -> "异常断开(无正常关闭握手)"
+            else -> "其他"
+        }
+        LogHelper.log("APP", "会话结束 code=$code remote=$remote reason=$reasonText 判定=$verdict " +
                 "时长=${String.format("%.1f", alive)}s 收包=$msgCount 指令=$cmdCount 回Ok=$pongCount " +
                 "静默=${String.format("%.1f", idle)}s 最后指令=${lastCmdSummary.ifEmpty { "无" }}")
     }
@@ -385,6 +398,7 @@ class ButtplugServer(
             val level = value.coerceIn(0, BleManager.LEVELS)
             LogHelper.io("WS", "OutputCmd feature=$featureIndex $key value=$value -> 档位 $level")
             lastCmdSummary = "feature=$featureIndex $key=$value"
+            lastLevel = value
             val sent = when (key) {
                 "Vibrate" -> ble.vibrateLevel(level)
                 "Oscillate" -> ble.oscillateLevel(level)
