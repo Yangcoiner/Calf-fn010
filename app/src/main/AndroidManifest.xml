@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 常驻前台服务: 防止熄屏后进程被系统冻结导致连接被 RST -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
@@ -38,6 +40,7 @@
         <service
             android:name=".BridgeForegroundService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice" />
 
         <activity

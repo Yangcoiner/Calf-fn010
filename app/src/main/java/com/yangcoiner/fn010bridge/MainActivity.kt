@@ -100,6 +100,8 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btnExport).setOnClickListener { exportLog() }
 
+        findViewById<Button>(R.id.btnKeepAlive).setOnClickListener { openKeepAlive() }
+
         // 详细报文开关: 关掉后只记关键事件(连接/断开/统计/错误), 日志体积小一个量级
         val chkVerbose = findViewById<android.widget.CheckBox>(R.id.chkVerbose)
         chkVerbose.isChecked = getPrefs().getBoolean("verbose_log", true)
@@ -271,6 +273,7 @@ class MainActivity : AppCompatActivity() {
                 "${Build.MANUFACTURER} ${Build.MODEL}  IP=${getLocalIp()} 端口=12345")
         LogHelper.log("ENV", "详细报文=${if (LogHelper.verbose) "开" else "关"} " +
                 "日志文件=${LogHelper.fileSizeKb()}KB")
+        logBgStatus()
 
         acquireNetLocks()
         // 前台服务: 熄屏后不让系统冻结进程(socket 被冻结时对端会收到 RST)
@@ -366,6 +369,63 @@ class MainActivity : AppCompatActivity() {
                 ?.hostAddress ?: "<未连Wi-Fi>"
         } catch (_: Exception) {
             "<获取IP失败>"
+        }
+    }
+
+    /** 记录"系统会不会冻我"相关的三项状态, 断连时一眼能看出是不是没开权限。 */
+    private fun logBgStatus() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val ignoring = pm.isIgnoringBatteryOptimizations(packageName)
+            LogHelper.log("BG", "电池优化豁免=${if (ignoring) "已豁免" else "未豁免(可能被冻结)"}")
+        } catch (e: Exception) {
+            LogHelper.log("BG", "电池优化状态读取失败:${e.message}")
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            val ok = ContextCompat.checkSelfPermission(
+                this, "android.permission.POST_NOTIFICATIONS"
+            ) == PackageManager.PERMISSION_GRANTED
+            LogHelper.log("BG", "通知权限=${if (ok) "有" else "无(前台服务通知会被隐藏)"}")
+        }
+        LogHelper.log("BG", "前台服务=已请求 (见 SVC 日志)")
+    }
+
+    /**
+     * 后台保活设置。
+     *
+     * Android 12 起有应用冻结(Freezer), 国产 ROM 还会额外限制后台。
+     * 被冻结时的表现就是: 定时器停摆几十秒, 播放器等不到响应, 自己断开。
+     * 唯一可靠的解法是让用户把这个应用加进系统的"不限制后台"名单。
+     */
+    private fun openKeepAlive() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        try {
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val i = android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                ).apply { data = android.net.Uri.parse("package:$packageName") }
+                startActivity(i)
+                status("请在弹窗里选「允许」, 否则后台会被冻结导致断连。")
+            } else {
+                val i = android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                ).apply { data = android.net.Uri.parse("package:$packageName") }
+                startActivity(i)
+                status("已豁免电池优化。若仍被冻结, 请在系统设置里把本应用设为" +
+                        "「允许后台运行 / 自启动 / 无限制」。")
+            }
+        } catch (e: Exception) {
+            // 有些 ROM 不认这个 action, 退到应用详情页让用户手动找
+            try {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                    ).apply { data = android.net.Uri.parse("package:$packageName") }
+                )
+                status("请在本页面找「电池 / 后台运行」并设为不限制。")
+            } catch (_: Exception) {
+                status("无法打开系统设置:${e.message}")
+            }
         }
     }
 

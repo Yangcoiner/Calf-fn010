@@ -70,7 +70,9 @@ class BridgeForegroundService : Service() {
         }
         try {
             startForeground(NOTI_ID, buildNotification())
+            LogHelper.log("SVC", "前台服务已启动(常驻通知已挂)")
         } catch (e: Exception) {
+            LogHelper.log("SVC", "前台服务启动失败: ${e.javaClass.simpleName} ${e.message}")
             // Android 14 对 connectedDevice 类型要求蓝牙权限已授权;
             // 权限没给时 startForeground 会抛 SecurityException。
             // 这种情况下不要崩, 退化成普通后台服务(Wi-Fi/CPU 锁仍然有效)。
@@ -85,7 +87,14 @@ class BridgeForegroundService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // 用户在最近任务里划掉时不要把服务带走, 否则连接必断
+        LogHelper.log("SVC", "任务被划掉, 服务保持运行")
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        LogHelper.log("SVC", "前台服务已销毁")
         try {
             stopForeground(true)
         } catch (_: Exception) {

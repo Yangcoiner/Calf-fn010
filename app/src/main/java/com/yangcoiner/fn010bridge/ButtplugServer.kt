@@ -84,6 +84,10 @@ class ButtplugServer(
     /** 连接存活监测线程。 */
     private var watchdog: java.util.Timer? = null
 
+    // 冻结/停顿检测用: 上一次心跳的墙上时间与开机以来的 CPU 时间
+    private var lastWall = 0L
+    private var lastUp = 0L
+
     /** 服务器 -> 客户端 Ping 定时器。 */
     private var pingTimer: java.util.Timer? = null
 
@@ -113,6 +117,8 @@ class ButtplugServer(
 
     override fun onStart() {
         onStatus("Buttplug 服务器监听端口 $port (协议 v$PROTOCOL_VERSION_MAJOR)")
+        lastWall = System.currentTimeMillis()
+        lastUp = android.os.SystemClock.uptimeMillis()
         startWatchdog()
         startPing()
     }
@@ -156,6 +162,27 @@ class ButtplugServer(
         watchdog = java.util.Timer("fn010-watchdog", true).also { t ->
             t.scheduleAtFixedRate(object : java.util.TimerTask() {
                 override fun run() {
+                    // ---- 冻结检测 ----
+                    // 定时器本该每 5 秒跑一次。若实际间隔远大于 5 秒, 说明进程被
+                    // 暂停过(安卓 Freezer / Doze / 深度睡眠)。区分两种情形:
+                    //   wall 走得比 uptime 快  -> CPU 真的睡了(深度睡眠)
+                    //   wall 与 uptime 同步     -> 线程被冻/饿死, 但 CPU 在跑
+                    // 这个判据能直接告诉下次是"被系统冻了"还是"自己卡住了"。
+                    val nowWall = System.currentTimeMillis()
+                    val nowUp = android.os.SystemClock.uptimeMillis()
+                    if (lastWall > 0L) {
+                        val dw = (nowWall - lastWall) / 1000.0
+                        val du = (nowUp - lastUp) / 1000.0
+                        if (dw > 12.0) {
+                            val kind = if (dw - du > 1.0) "CPU深度睡眠" else "线程被冻结/饿死"
+                            LogHelper.log("FREEZE",
+                                "定时器停顿 ${String.format("%.1f", dw)}s " +
+                                "(uptime只走了 ${String.format("%.1f", du)}s) -> $kind")
+                        }
+                    }
+                    lastWall = nowWall
+                    lastUp = nowUp
+
                     val ws = client ?: return
                     val last = lastClientMsgAt
                     if (last <= 0L) return
@@ -210,16 +237,16 @@ class ButtplugServer(
     }
 
     override fun onClose(ws: WebSocket, code: Int, reason: String, remote: Boolean) {
+        val idleAtClose = if (lastClientMsgAt > 0)
+            (System.currentTimeMillis() - lastClientMsgAt) / 1000.0 else -1.0
         if (client === ws) {
             client = null
-            lastClientMsgAt = 0L
         }
         // 安全兜底：客户端断开时停止马达
         ble.stopAll()
         val alive = if (sessionStartAt > 0)
             (System.currentTimeMillis() - sessionStartAt) / 1000.0 else 0.0
-        val idle = if (lastClientMsgAt > 0)
-            (System.currentTimeMillis() - lastClientMsgAt) / 1000.0 else -1.0
+        val idle = idleAtClose
         val reasonText = when (code) {
             1000 -> "正常关闭(对端主动)"
             1001 -> "端点离开"
