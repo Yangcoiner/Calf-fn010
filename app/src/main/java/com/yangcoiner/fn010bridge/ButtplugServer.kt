@@ -41,8 +41,28 @@ class ButtplugServer(
         const val PROTOCOL_VERSION_MAJOR = 4
         const val PROTOCOL_VERSION_MINOR = 0
         const val MAX_PING_TIME_MS = 30000
+
+        /**
+         * 服务器主动发 Ping 的间隔(毫秒)。
+         *
+         * Buttplug 规范里 Ping 是**服务器发**、客户端回 Ok。
+         * 我们在 ServerInfo 里声明了 MaxPingTime=30000, 意思就是
+         * "客户端最多等 30 秒就该收到我的消息"。
+         * 之前从来没发过 Ping —— 播放器等满 30 秒没收到任何东西,
+         * 就按正常流程 close(1000) 断开, 日志表现就是
+         * "客户端断开 (1000), 马达已自动停止", 而且大约每 30 秒一次。
+         *
+         * 10 秒发一次, 留足余量。
+         */
+        const val PING_INTERVAL_MS = 10_000L
         const val SERVER_NAME = "FN010 Bridge"
         const val DEVICE_INDEX = 0
+
+        /**
+         * 客户端多久没有任何消息就认为它已经不在了（毫秒）。
+         * 只用来「兜底停马达」, 不用来断连接 —— 见 init 里的说明。
+         */
+        const val CLIENT_STALE_MS = 60_000L
 
         // Buttplug 错误码
         const val ERROR_UNKNOWN = 0
@@ -57,25 +77,125 @@ class ButtplugServer(
     @Volatile
     private var clientProtocolMajor: Int = -1
 
+    /** 最近一次收到客户端消息的时刻, 用于兜底停马达。 */
+    @Volatile
+    private var lastClientMsgAt = 0L
+
+    /** 连接存活监测线程。 */
+    private var watchdog: java.util.Timer? = null
+
+    /** 服务器 -> 客户端 Ping 定时器。 */
+    private var pingTimer: java.util.Timer? = null
+
+    /** Ping 序号, 只增不减。 */
+    private val pingId = java.util.concurrent.atomic.AtomicLong(1L)
+
     init {
         isReuseAddr = true
-        connectionLostTimeout = 15
+        // connectionLostTimeout = 15 会让 Java-WebSocket 每 15 秒发一次 ping,
+        // 收不到 pong 就直接 close(1006)。这是"总是断开"的主因:
+        //   * 客户端不一定会回 WebSocket 层的 pong
+        //   * 熄屏 / Wi-Fi 省电 / Doze 时任何 >15s 的停顿都会被判掉线
+        // 默认值是 60, 我们设 15 等于把容错压到极小。
+        // 设 0 = 关闭框架的自动掉线判定, 由下面的 watchdog 自己兜底,
+        // 这样网络抖动不会断连接, 而马达仍然有安全停止机制。
+        connectionLostTimeout = 0
     }
 
     override fun onStart() {
         onStatus("Buttplug 服务器监听端口 $port (协议 v$PROTOCOL_VERSION_MAJOR)")
+        startWatchdog()
+        startPing()
+    }
+
+    /**
+     * 周期给客户端发 Ping。
+     *
+     * 这是保持连接不断的关键: 规范要求服务器在 MaxPingTime 内
+     * 至少发一次消息, 否则客户端会认为服务器失联并主动断开(1000)。
+     */
+    private fun startPing() {
+        pingTimer?.cancel()
+        pingTimer = java.util.Timer("fn010-ping", true).also { t ->
+            t.scheduleAtFixedRate(object : java.util.TimerTask() {
+                override fun run() {
+                    val ws = client ?: return
+                    if (!ws.isOpen) return
+                    try {
+                        ws.send(JSONArray().put(
+                            JSONObject().put("Ping",
+                                JSONObject().put("Id", pingId.getAndIncrement()))).toString())
+                    } catch (_: Exception) {
+                        // 发送失败由 onClose / onError 兜底
+                    }
+                }
+            }, PING_INTERVAL_MS, PING_INTERVAL_MS)
+        }
+    }
+
+    /**
+     * 兜底监测: 客户端 60 秒没发过任何消息, 就把马达停掉。
+     *
+     * 为什么只停马达、不断连接:
+     *   播放器暂停/拖动时本来就可能一分钟不发指令, 断连是误伤;
+     *   但如果客户端真的没了(手机切走/进程被杀), 马达不能一直转。
+     */
+    private fun startWatchdog() {
+        watchdog?.cancel()
+        watchdog = java.util.Timer("fn010-watchdog", true).also { t ->
+            t.scheduleAtFixedRate(object : java.util.TimerTask() {
+                override fun run() {
+                    val ws = client ?: return
+                    val last = lastClientMsgAt
+                    if (last <= 0L) return
+                    val idle = System.currentTimeMillis() - last
+                    if (idle >= CLIENT_STALE_MS) {
+                        ble.stopAll()
+                        lastClientMsgAt = System.currentTimeMillis()
+                        onStatus("客户端已 ${idle / 1000}s 无指令,马达已自动停止(连接保留)。")
+                        try {
+                            ws.send(JSONArray().put(errJson(0, ERROR_UNKNOWN,
+                                "客户端长时间无指令,马达已停止")).toString())
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            }, 5000L, 5000L)
+        }
     }
 
     override fun onOpen(ws: WebSocket, handshake: ClientHandshake) {
+        // 新客户端进来时顶掉旧的: 播放器重连时旧连接常常是半死状态,
+        // 留着会让指令发到已经没人看的 socket 上。
+        val old = client
         client = ws
+        lastClientMsgAt = System.currentTimeMillis()
+        if (old != null && old !== ws && old.isOpen) {
+            try {
+                old.close(1000, "被新连接替换")
+            } catch (_: Exception) {
+            }
+        }
         onStatus("客户端已连接:${ws.remoteSocketAddress}")
     }
 
     override fun onClose(ws: WebSocket, code: Int, reason: String, remote: Boolean) {
-        if (client === ws) client = null
+        if (client === ws) {
+            client = null
+            lastClientMsgAt = 0L
+        }
         // 安全兜底：客户端断开时停止马达
         ble.stopAll()
         onStatus("客户端断开 ($code),马达已自动停止。")
+    }
+
+    /** 停服时把监测线程一起收掉, 否则它会在后台一直跑。 */
+    override fun stop() {
+        watchdog?.cancel()
+        watchdog = null
+        pingTimer?.cancel()
+        pingTimer = null
+        super.stop()
     }
 
     override fun onError(ws: WebSocket?, ex: Exception) {
@@ -87,6 +207,7 @@ class ButtplugServer(
     }
 
     override fun onMessage(ws: WebSocket, message: String) {
+        lastClientMsgAt = System.currentTimeMillis()
         try {
             LogHelper.log("WS", "RX: $message")
             val trimmed = message.trim()
@@ -134,6 +255,12 @@ class ButtplugServer(
             }
 
             "Ping" -> out.put(okJson(id))
+
+            // 客户端回应我们的 Ping 时发的就是 Ok。
+            // 不处理会被当成未知消息回一个 Error, 客户端可能因此判定
+            // 协议异常而断开 —— 必须静默吞掉。
+            "Ok" -> {
+            }
 
             "StartScanning" -> {
                 // 扫描一直在跑，这里直接回报设备
