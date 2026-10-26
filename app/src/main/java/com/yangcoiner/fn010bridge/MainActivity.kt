@@ -99,6 +99,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
         findViewById<Button>(R.id.btnExport).setOnClickListener { exportLog() }
+
+        // 详细报文开关: 关掉后只记关键事件(连接/断开/统计/错误), 日志体积小一个量级
+        val chkVerbose = findViewById<android.widget.CheckBox>(R.id.chkVerbose)
+        chkVerbose.isChecked = getPrefs().getBoolean("verbose_log", true)
+        LogHelper.verbose = chkVerbose.isChecked
+        chkVerbose.setOnCheckedChangeListener { _, checked ->
+            LogHelper.verbose = checked
+            getPrefs().edit().putBoolean("verbose_log", checked).apply()
+            Toast.makeText(this,
+                if (checked) "已开启报文级日志" else "已关闭报文级日志(仅保留关键事件)",
+                Toast.LENGTH_SHORT).show()
+        }
         findViewById<Button>(R.id.btnCopy).setOnClickListener {
             val addr = "ws://" + getLocalIp() + ":12345"
             copyAddr(addr + "\nws://127.0.0.1:12345")
@@ -254,6 +266,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        LogHelper.section("服务器启动")
+        LogHelper.log("ENV", "Android ${Build.VERSION.RELEASE}(API ${Build.VERSION.SDK_INT}) " +
+                "${Build.MANUFACTURER} ${Build.MODEL}  IP=${getLocalIp()} 端口=12345")
+        LogHelper.log("ENV", "详细报文=${if (LogHelper.verbose) "开" else "关"} " +
+                "日志文件=${LogHelper.fileSizeKb()}KB")
+
         acquireNetLocks()
         // 前台服务: 熄屏后不让系统冻结进程(socket 被冻结时对端会收到 RST)
         try {
@@ -314,10 +332,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun exportLog() {
         try {
-            val dir = java.io.File(getExternalFilesDir(null), "logs")
-            val f = java.io.File(dir, "fn010_log.txt")
-            if (!f.exists()) {
-                Toast.makeText(this, "暂无日志文件", Toast.LENGTH_SHORT).show()
+            // 导出的是「摘要 + 原文」的合并文件: 开头就有连断统计,
+            // 不用在几万行里自己捞断连记录。
+            val f = LogHelper.exportBundle(this)
+            if (!f.exists() || f.length() == 0L) {
+                Toast.makeText(this, "暂无日志", Toast.LENGTH_SHORT).show()
                 return
             }
             val uri = androidx.core.content.FileProvider.getUriForFile(

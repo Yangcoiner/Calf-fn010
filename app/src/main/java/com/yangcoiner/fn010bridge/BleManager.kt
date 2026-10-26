@@ -169,7 +169,19 @@ class BleManager(
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     ready = false
-                    onStatus("BLE 已断开。")
+                    // status 是 GATT 层的错误码, 断开原因全在这里:
+                    //   0=正常, 8=连接超时, 19=对端主动断开, 133=GATT 错误(常见于连太多/系统回收),
+                    //   62/133 在国产 ROM 上基本都是省电策略导致的
+                    val reason = when (status) {
+                        0 -> "正常断开"
+                        8 -> "连接超时"
+                        19 -> "设备主动断开(可能已关机/离开范围)"
+                        22 -> "本地主机终止"
+                        133 -> "GATT 错误(常见: 系统回收/连接数超限)"
+                        else -> "status=$status"
+                    }
+                    LogHelper.log("BLE", "断开 status=$status ($reason)")
+                    onStatus("BLE 已断开($reason)。")
                 }
             }
         }
@@ -212,7 +224,7 @@ class BleManager(
         override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             val hex = characteristic.value?.joinToString("") { "%02x".format(it) } ?: ""
             Log.d("FN010", "notify: $hex")
-            LogHelper.log("BLE", "RX notify: $hex")
+            LogHelper.io("BLE", "RX notify: $hex")
         }
 
         override fun onCharacteristicWrite(
@@ -247,7 +259,7 @@ class BleManager(
         w.value = frame
         val hex = frame.joinToString("") { "%02x".format(it) }
         val ok = g.writeCharacteristic(w)
-        LogHelper.log("BLE", "TX ${if (ok) "ok" else "FAIL"}: $hex")
+        LogHelper.io("BLE", "TX ${if (ok) "ok" else "FAIL"}: $hex")
         if (!ok) {
             // 发送失败:释放锁并丢弃该包,防止队列卡死
             synchronized(writeQueue) {

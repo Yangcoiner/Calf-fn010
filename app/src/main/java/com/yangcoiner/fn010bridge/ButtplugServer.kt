@@ -90,6 +90,15 @@ class ButtplugServer(
     /** Ping 序号, 只增不减。 */
     private val pingId = java.util.concurrent.atomic.AtomicLong(1L)
 
+    // ---- 本次连接的统计 (断线时打进日志, 便于复盘) ----
+    @Volatile private var sessionStartAt = 0L
+    @Volatile private var msgCount = 0
+    @Volatile private var cmdCount = 0
+    @Volatile private var pongCount = 0
+    @Volatile private var lastCmdAt = 0L
+    @Volatile private var lastCmdSummary = ""
+    @Volatile private var statsTick = 0
+
     init {
         isReuseAddr = true
         // connectionLostTimeout = 15 会让 Java-WebSocket 每 15 秒发一次 ping,
@@ -122,9 +131,11 @@ class ButtplugServer(
                     val ws = client ?: return
                     if (!ws.isOpen) return
                     try {
+                        val pid = pingId.getAndIncrement()
                         ws.send(JSONArray().put(
                             JSONObject().put("Ping",
-                                JSONObject().put("Id", pingId.getAndIncrement()))).toString())
+                                JSONObject().put("Id", pid))).toString())
+                        LogHelper.io("WS", "TX: [{\"Ping\":{\"Id\":$pid}}]")
                     } catch (_: Exception) {
                         // 发送失败由 onClose / onError 兜底
                     }
@@ -148,6 +159,17 @@ class ButtplugServer(
                     val ws = client ?: return
                     val last = lastClientMsgAt
                     if (last <= 0L) return
+                    statsTick++
+                    if (statsTick % 6 == 0) {
+                        val alive = (System.currentTimeMillis() - sessionStartAt) / 1000.0
+                        val idle = (System.currentTimeMillis() - last) / 1000.0
+                        val sinceCmd = if (lastCmdAt > 0)
+                            (System.currentTimeMillis() - lastCmdAt) / 1000.0 else -1.0
+                        LogHelper.log("STAT",
+                            "在线=${String.format("%.0f", alive)}s 指令=$cmdCount 回Ok=$pongCount " +
+                            "空闲=${String.format("%.0f", idle)}s 距最后指令=${String.format("%.0f", sinceCmd)}s " +
+                            (if (ws.isOpen) "socket=ok" else "socket=已关"))
+                    }
                     val idle = System.currentTimeMillis() - last
                     if (idle >= CLIENT_STALE_MS) {
                         ble.stopAll()
@@ -176,7 +198,15 @@ class ButtplugServer(
             } catch (_: Exception) {
             }
         }
+        sessionStartAt = System.currentTimeMillis()
+        msgCount = 0
+        cmdCount = 0
+        pongCount = 0
+        lastCmdAt = 0L
+        lastCmdSummary = ""
         onStatus("客户端已连接:${ws.remoteSocketAddress}")
+        LogHelper.section("新会话 ${ws.remoteSocketAddress}")
+        LogHelper.log("APP", "会话开始 ping间隔=${PING_INTERVAL_MS}ms 版本协商前")
     }
 
     override fun onClose(ws: WebSocket, code: Int, reason: String, remote: Boolean) {
@@ -186,7 +216,23 @@ class ButtplugServer(
         }
         // 安全兜底：客户端断开时停止马达
         ble.stopAll()
+        val alive = if (sessionStartAt > 0)
+            (System.currentTimeMillis() - sessionStartAt) / 1000.0 else 0.0
+        val idle = if (lastClientMsgAt > 0)
+            (System.currentTimeMillis() - lastClientMsgAt) / 1000.0 else -1.0
+        val reasonText = when (code) {
+            1000 -> "正常关闭(对端主动)"
+            1001 -> "端点离开"
+            1002 -> "协议错误"
+            1005 -> "无状态码"
+            1006 -> "异常断开(超时/网络中断/进程被冻)"
+            1011 -> "服务端内部错误"
+            else -> "其他"
+        }
         onStatus("客户端断开 ($code),马达已自动停止。")
+        LogHelper.log("APP", "会话结束 code=$code remote=$remote reason=$reasonText " +
+                "时长=${String.format("%.1f", alive)}s 收包=$msgCount 指令=$cmdCount 回Ok=$pongCount " +
+                "静默=${String.format("%.1f", idle)}s 最后指令=${lastCmdSummary.ifEmpty { "无" }}")
     }
 
     /** 停服时把监测线程一起收掉, 否则它会在后台一直跑。 */
@@ -208,8 +254,14 @@ class ButtplugServer(
 
     override fun onMessage(ws: WebSocket, message: String) {
         lastClientMsgAt = System.currentTimeMillis()
+        msgCount++
+        if ("OutputCmd" in message) {
+            cmdCount++
+            lastCmdAt = lastClientMsgAt
+        }
+        if ("\"Ok\"" in message) pongCount++
         try {
-            LogHelper.log("WS", "RX: $message")
+            LogHelper.io("WS", "RX: $message")
             val trimmed = message.trim()
             // 客户端可能发单对象，也可能发数组；统一成数组处理
             val msgs = if (trimmed.startsWith("[")) {
@@ -224,7 +276,7 @@ class ButtplugServer(
             if (replies.length() > 0) {
                 // 关键：所有出站消息必须包在数组里（规范要求单元素数组包裹）
                 val payload = replies.toString()
-                LogHelper.log("WS", "TX: $payload")
+                LogHelper.io("WS", "TX: $payload")
                 ws.send(payload)
             }
         } catch (e: Exception) {
@@ -304,7 +356,8 @@ class ButtplugServer(
             val payload = command.optJSONObject(key)
             val value = payload?.optInt("Value", 0) ?: 0
             val level = value.coerceIn(0, BleManager.LEVELS)
-            LogHelper.log("WS", "OutputCmd feature=$featureIndex $key value=$value -> 档位 $level")
+            LogHelper.io("WS", "OutputCmd feature=$featureIndex $key value=$value -> 档位 $level")
+            lastCmdSummary = "feature=$featureIndex $key=$value"
             val sent = when (key) {
                 "Vibrate" -> ble.vibrateLevel(level)
                 "Oscillate" -> ble.oscillateLevel(level)
