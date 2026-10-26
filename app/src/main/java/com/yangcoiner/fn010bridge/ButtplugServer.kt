@@ -170,15 +170,29 @@ class ButtplugServer(
      */
     private fun checkListener() {
         if (listenerDeadReported) return
+        // 只探测「端口还能不能绑」, 绝不建立真实连接。
+        // 曾经写成 Socket().connect(127.0.0.1:port) —— 那是致命的:
+        // 这个连接会被我们自己的 onOpen 当成新客户端, 于是把正在用的
+        // 播放器连接当成"旧连接"关掉, 变成自己踢自己。
+        var probe: java.net.ServerSocket? = null
         try {
-            java.net.Socket().use { s ->
-                s.connect(java.net.InetSocketAddress("127.0.0.1", port), 400)
-            }
-        } catch (e: Exception) {
+            probe = java.net.ServerSocket()
+            probe.reuseAddress = true
+            probe.bind(java.net.InetSocketAddress("0.0.0.0", port))
+            // 能绑上 = 原来的监听已经不在了
             listenerDeadReported = true
-            LogHelper.log("LISTEN", "端口 $port 自检失败: ${e.javaClass.simpleName} ${e.message} -> 请求重建")
+            LogHelper.log("LISTEN", "端口 $port 已无监听(自检可绑定) -> 请求重建")
             onStatus("监听端口已失效,正在自动重建 ...")
             onListenerDead?.invoke()
+        } catch (e: java.io.IOException) {
+            // 端口被占用 = 我们的监听还活着, 这是正常情况
+        } catch (e: Exception) {
+            LogHelper.log("LISTEN", "自检异常(忽略): ${e.javaClass.simpleName} ${e.message}")
+        } finally {
+            try {
+                probe?.close()
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -219,7 +233,7 @@ class ButtplugServer(
                     val last = lastClientMsgAt
                     if (last <= 0L) return
                     statsTick++
-                    if (statsTick % 6 == 0) {
+                    if (statsTick % 2 == 0) {
                         checkListener()
                         val alive = (System.currentTimeMillis() - sessionStartAt) / 1000.0
                         val idle = (System.currentTimeMillis() - last) / 1000.0
@@ -320,6 +334,13 @@ class ButtplugServer(
             code == 1000 -> "播放中断开(最后档位=$lastLevel, 未归零)"
             code == 1006 -> "异常断开(无正常关闭握手)"
             else -> "其他"
+        }
+        // 断开后立刻确认监听是否还活着。
+        // 如果 accept 线程已经死了, 等 30 秒的周期自检太慢 ——
+        // 播放器早就放弃重连了(用户就得手动点停止/开启)。
+        try {
+            checkListener()
+        } catch (_: Exception) {
         }
         LogHelper.log("APP", "会话结束 code=$code remote=$remote reason=$reasonText 判定=$verdict " +
                 "时长=${String.format("%.1f", alive)}s 收包=$msgCount 指令=$cmdCount 回Ok=$pongCount " +
