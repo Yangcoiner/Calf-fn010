@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
+    private lateinit var tvAddr: TextView
     private lateinit var tvVibLevel: TextView
     private lateinit var tvOscLevel: TextView
     // 上游响应开关:true = 该马达响应上游客户端(游戏/Intiface)请求;false = 屏蔽
@@ -113,6 +114,14 @@ class MainActivity : AppCompatActivity() {
                 if (checked) "已开启报文级日志" else "已关闭报文级日志(仅保留关键事件)",
                 Toast.LENGTH_SHORT).show()
         }
+        tvAddr = findViewById(R.id.tvAddr)
+        tvAddr.setOnClickListener {
+            if (server != null) {
+                copyAddr("ws://" + getLocalIp() + ":12345\nws://127.0.0.1:12345")
+                Toast.makeText(this, "两个地址已复制", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         findViewById<Button>(R.id.btnCopy).setOnClickListener {
             val addr = "ws://" + getLocalIp() + ":12345"
             copyAddr(addr + "\nws://127.0.0.1:12345")
@@ -285,6 +294,7 @@ class MainActivity : AppCompatActivity() {
 
         val addr = "ws://" + getLocalIp() + ":12345"
         copyAddr(addr)
+        showAddr()
         status("Buttplug 服务器已启动(局域网地址已复制)\n" +
                "局域网连接:$addr\n" +
                "本机连接:ws://127.0.0.1:12345\n" +
@@ -305,6 +315,7 @@ class MainActivity : AppCompatActivity() {
         vibGate = true
         oscGate = true
         paintGates()
+        tvAddr.text = "未启动"
         status("已停止。")
         updateToggleUi()
     }
@@ -353,6 +364,24 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, "导出失败:${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    /** 把连接地址常驻显示在界面上(不靠剪贴板), 点一下可复制。 */
+    private fun showAddr() {
+        if (server == null) {
+            tvAddr.text = "未启动"
+            return
+        }
+        val ip = getLocalIp()
+        tvAddr.text = "局域网  ws://" + ip + ":12345\n" +
+                "本机      ws://127.0.0.1:12345\n" +
+                "(点这里复制)"
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Wi-Fi 切换后 IP 会变, 回到界面时刷新一下
+        if (server != null) showAddr()
     }
 
     private fun copyAddr(addr: String) {
