@@ -247,7 +247,19 @@ class BleManager(
         return true
     }
 
+    /** 上次写入成功的时间, 用于检测 writeBusy 卡死。 */
+    @Volatile private var lastWriteAt = 0L
+
     private fun pumpWrite() {
+        // 有些协议栈对 WRITE_TYPE_NO_RESPONSE 不回 onCharacteristicWrite,
+        // 那样 writeBusy 会永远为 true, 队列只进不出 —— 客户端看着是"连上了但不动"。
+        // 超过 1200ms 没动静就强制解锁重试。
+        val now = System.currentTimeMillis()
+        if (writeBusy && lastWriteAt > 0 && now - lastWriteAt > 1200) {
+            synchronized(writeQueue) { writeBusy = false }
+            LogHelper.log("BLE", "写入卡死超时, 强制解锁 (队列 ${writeQueue.size})")
+        }
+        lastWriteAt = now
         val g = gatt ?: return
         val w = writeChar ?: return
         val frame = synchronized(writeQueue) {
@@ -258,7 +270,15 @@ class BleManager(
         w.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         w.value = frame
         val hex = frame.joinToString("") { "%02x".format(it) }
-        val ok = g.writeCharacteristic(w)
+        // writeCharacteristic 在 GATT 已关/权限被撤时会抛 SecurityException /
+        // IllegalStateException。这个调用可能发生在 WebSocket 的回调线程上,
+        // 一旦异常逃出去会把框架线程弄死 —— 表现就是"断一次以后再也连不上"。
+        val ok = try {
+            g.writeCharacteristic(w)
+        } catch (e: Exception) {
+            LogHelper.log("BLE", "writeCharacteristic 异常: ${e.javaClass.simpleName} ${e.message}")
+            false
+        }
         LogHelper.io("BLE", "TX ${if (ok) "ok" else "FAIL"}: $hex")
         if (!ok) {
             // 发送失败:释放锁并丢弃该包,防止队列卡死

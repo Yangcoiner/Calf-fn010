@@ -28,6 +28,10 @@ class MainActivity : AppCompatActivity() {
     private var oscGate = true
     private var calibrating = false
 
+    /** 防止自动重建递归。 */
+    @Volatile private var restarting = false
+    private var restartCount = 0
+
     // 锁放在 companion object: 服务器本身是进程级保留的,
     // 锁如果挂在 Activity 实例上, 转屏重建后旧实例的锁没人释放,
     // 新实例又会再拿一把 —— 既泄漏又释放不掉。
@@ -265,7 +269,11 @@ class MainActivity : AppCompatActivity() {
         ble = b
         b.start()
 
-        val srv = ButtplugServer(12345, b) { msg -> runOnUiThread { status(msg) } }
+        val srv = ButtplugServer(
+            12345, b,
+            { msg -> runOnUiThread { status(msg) } },
+            { runOnUiThread { restartServer() } }
+        )
         try {
             srv.start()
             server = srv
@@ -315,6 +323,7 @@ class MainActivity : AppCompatActivity() {
         vibGate = true
         oscGate = true
         paintGates()
+        restartCount = 0
         tvAddr.text = "未启动"
         status("已停止。")
         updateToggleUi()
@@ -330,6 +339,45 @@ class MainActivity : AppCompatActivity() {
     private fun acquireNetLocks() = acquireLocks(applicationContext) { status(it) }
 
     private fun releaseNetLocks() = releaseLocks()
+
+    /**
+     * 监听端口失效时自动重建服务器。
+     *
+     * 现象: 播放器断开后怎么都连不上, 必须点「停止」再「开启」。
+     * 原因是上一个服务器对象的监听已经死了(系统回收 / 回调线程异常退出),
+     * 但界面还以为它在跑。这里重建一个, 用户不用手动点。
+     */
+    private fun restartServer() {
+        if (restarting) return
+        restarting = true
+        try {
+            val b = ble ?: run {
+                status("BLE 未就绪,无法重建服务器。")
+                return
+            }
+            try {
+                server?.stop()
+            } catch (_: Exception) {
+            }
+            server = null
+            Thread.sleep(300)
+            val srv = ButtplugServer(
+                12345, b,
+                { msg -> runOnUiThread { status(msg) } },
+                { runOnUiThread { restartServer() } }
+            )
+            srv.start()
+            server = srv
+            restartCount++
+            LogHelper.log("LISTEN", "服务器已自动重建 (第 $restartCount 次)")
+            status("监听已自动重建(第 $restartCount 次),等待播放器连接。")
+            showAddr()
+        } catch (e: Exception) {
+            status("自动重建失败:${e.message},请点「停止」再「开启」。")
+        } finally {
+            restarting = false
+        }
+    }
 
     private fun updateToggleUi() {
         val btn = findViewById<Button>(R.id.btnToggle)
@@ -369,7 +417,8 @@ class MainActivity : AppCompatActivity() {
     /** 把连接地址常驻显示在界面上(不靠剪贴板), 点一下可复制。 */
     private fun showAddr() {
         if (server == null) {
-            tvAddr.text = "未启动"
+            restartCount = 0
+        tvAddr.text = "未启动"
             return
         }
         val ip = getLocalIp()

@@ -32,9 +32,11 @@ import java.net.InetSocketAddress
  * level 0 表示停止（发 on/off=0），1..100 映射到实测速度字节。
  */
 class ButtplugServer(
-    port: Int,
+    private val port: Int,
     private val ble: BleManager,
-    private val onStatus: (String) -> Unit
+    private val onStatus: (String) -> Unit,
+    /** 监听端口被系统夺走/失效时回调, 由上层重建服务器。 */
+    private val onListenerDead: (() -> Unit)? = null
 ) : WebSocketServer(InetSocketAddress(port)) {
 
     companion object {
@@ -106,6 +108,9 @@ class ButtplugServer(
     @Volatile private var lastLevel = -1
     @Volatile private var statsTick = 0
 
+    /** 已经报告过监听失效, 避免刷屏/重复重建。 */
+    @Volatile private var listenerDeadReported = false
+
     init {
         isReuseAddr = true
         // connectionLostTimeout = 15 会让 Java-WebSocket 每 15 秒发一次 ping,
@@ -154,6 +159,30 @@ class ButtplugServer(
     }
 
     /**
+     * 监听端口自检。
+     *
+     * 为什么需要: 表现是"断开之后播放器怎么都连不上, 必须把 App 停掉重开"。
+     * 这说明 TCP 监听已经不在了(系统回收 / accept 线程异常退出 / 端口被占),
+     * 而我们的对象还活着, 界面上看起来"服务器在运行", 实际没人 listen。
+     * 这里每隔 30 秒对自己做一次 TCP connect:
+     *   连得上  -> 监听正常
+     *   被拒绝  -> 监听已死, 通知上层重建
+     */
+    private fun checkListener() {
+        if (listenerDeadReported) return
+        try {
+            java.net.Socket().use { s ->
+                s.connect(java.net.InetSocketAddress("127.0.0.1", port), 400)
+            }
+        } catch (e: Exception) {
+            listenerDeadReported = true
+            LogHelper.log("LISTEN", "端口 $port 自检失败: ${e.javaClass.simpleName} ${e.message} -> 请求重建")
+            onStatus("监听端口已失效,正在自动重建 ...")
+            onListenerDead?.invoke()
+        }
+    }
+
+    /**
      * 兜底监测: 客户端 60 秒没发过任何消息, 就把马达停掉。
      *
      * 为什么只停马达、不断连接:
@@ -191,6 +220,7 @@ class ButtplugServer(
                     if (last <= 0L) return
                     statsTick++
                     if (statsTick % 6 == 0) {
+                        checkListener()
                         val alive = (System.currentTimeMillis() - sessionStartAt) / 1000.0
                         val idle = (System.currentTimeMillis() - last) / 1000.0
                         val sinceCmd = if (lastCmdAt > 0)
@@ -217,6 +247,14 @@ class ButtplugServer(
     }
 
     override fun onOpen(ws: WebSocket, handshake: ClientHandshake) {
+        try {
+            onOpenSafe(ws)
+        } catch (e: Exception) {
+            LogHelper.log("APP", "onOpen 处理异常(已吞掉): ${e.javaClass.simpleName} ${e.message}")
+        }
+    }
+
+    private fun onOpenSafe(ws: WebSocket) {
         // 新客户端进来时顶掉旧的: 播放器重连时旧连接常常是半死状态,
         // 留着会让指令发到已经没人看的 socket 上。
         val old = client
@@ -241,6 +279,19 @@ class ButtplugServer(
     }
 
     override fun onClose(ws: WebSocket, code: Int, reason: String, remote: Boolean) {
+        // 这里的异常绝对不能逃出去。
+        // Java-WebSocket 的回调是在它自己的 selector / decoder 线程上跑的,
+        // 抛出去会把那个线程打死 —— 之后 accept 不再工作, 表现就是
+        // "断一次以后播放器怎么都连不上, 必须把 App 停掉重开"。
+        // 而 ble.stopAll() 里会碰 GATT, 完全可能抛 SecurityException。
+        try {
+            onCloseSafe(ws, code, reason, remote)
+        } catch (e: Exception) {
+            LogHelper.log("APP", "onClose 处理异常(已吞掉): ${e.javaClass.simpleName} ${e.message}")
+        }
+    }
+
+    private fun onCloseSafe(ws: WebSocket, code: Int, reason: String, remote: Boolean) {
         val idleAtClose = if (lastClientMsgAt > 0)
             (System.currentTimeMillis() - lastClientMsgAt) / 1000.0 else -1.0
         if (client === ws) {
@@ -285,6 +336,10 @@ class ButtplugServer(
     }
 
     override fun onError(ws: WebSocket?, ex: Exception) {
+        try {
+            LogHelper.log("APP", "WS 错误: ${ex.javaClass.simpleName} ${ex.message}")
+        } catch (_: Exception) {
+        }
         if (ex.message?.contains("Address already in use") == true) {
             onStatus("端口 12345 已被占用,请点「全部停止」后重新启动。")
         } else {
