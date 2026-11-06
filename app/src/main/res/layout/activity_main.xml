@@ -84,6 +84,62 @@
         android:textSize="11sp" />
 
     <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="—— 伸缩映射 ——"
+        android:textStyle="bold"
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/btnDelta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="伸缩:直控(位置当档位)"
+        android:textSize="15sp" />
+
+    <TextView
+        android:id="@+id/tvVmax"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:fontFamily="monospace"
+        android:text="满速线:800 %/s(到这条线就是 100% 档)"
+        android:textSize="13sp" />
+
+    <SeekBar
+        android:id="@+id/seekVmax"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="10"
+        android:progress="4" />
+
+    <TextView
+        android:id="@+id/tvAmin"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:fontFamily="monospace"
+        android:text="小冲程阈值:<20%(以下改走振动)"
+        android:textSize="13sp" />
+
+    <SeekBar
+        android:id="@+id/seekAmin"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="8"
+        android:progress="4" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="直控 = 原有行为:上游给多少当多少档。差值 = 按「位移/间隔」算速度条档,Δ越大越快;位移小于阈值(小冲程)时伸缩停、改由振动代偿。两项参数仅在差值模式生效。"
+        android:textColor="#888888"
+        android:textSize="11sp" />
+
+    <TextView
         android:id="@+id/tvManualTitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

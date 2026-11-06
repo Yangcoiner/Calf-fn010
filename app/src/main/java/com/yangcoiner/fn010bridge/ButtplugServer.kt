@@ -5,6 +5,7 @@ import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import org.json.JSONArray
 import org.json.JSONObject
+import android.os.SystemClock
 import java.net.InetSocketAddress
 
 /**
@@ -26,10 +27,18 @@ class ButtplugServer(
         const val MESSAGE_VERSION = 3
         const val MAX_PING_TIME_MS = 30000
         const val SERVER_NAME = "FN010 Bridge"
+
+        /** 差值模式下多久没收到新位置就强制停机(防上游丢帧后马达卡在长开)。 */
+        const val WATCHDOG_MS = 250L
     }
 
     @Volatile
     private var client: WebSocket? = null
+
+    // ---- 差值模式的看门狗状态 ----
+    @Volatile private var running = false
+    @Volatile private var lastCmdAt = 0L
+    private var watchdogTripped = false
 
     init {
         isReuseAddr = true
@@ -37,8 +46,12 @@ class ButtplugServer(
     }
 
     override fun onStart() {
-        onStatus("Buttplug 服务器监听端口 $listenPort")
+        running = true
+        onStatus("Buttplug 服务器监听端口 $listenPort" +
+                if (DeltaMapper.enabled) "(伸缩:差值模式)" else "(伸缩:直控模式)")
+        startWatchdog()
     }
+
 
     override fun onOpen(ws: WebSocket, handshake: ClientHandshake) {
         client = ws
@@ -116,12 +129,14 @@ class ButtplugServer(
             "ScalarCmd" -> handleScalarCmd(body, id, out)
 
             "StopDeviceCmd" -> {
+                DeltaMapper.reset()
                 ble.stopAll()
                 out.put(okJson(id))
                 onStatus("StopDeviceCmd -> 双马达已停止")
             }
 
             "StopAllDevices" -> {
+                DeltaMapper.reset()
                 ble.stopAll()
                 out.put(okJson(id))
                 onStatus("StopAllDevices -> 双马达已停止")
@@ -148,17 +163,55 @@ class ButtplugServer(
             val scalar = s.optDouble("Scalar", 0.0).coerceIn(0.0, 1.0)
             val sent = when (index) {
                 0 -> ble.vibrate(scalar)
-                1 -> ble.oscillate(scalar)
+                // 伸缩通道:直控(原有)或差值模式(位置 -> 速度)
+                1 -> if (DeltaMapper.enabled) oscillateByDelta(scalar) else ble.oscillate(scalar)
                 else -> false
             }
             if (!sent) ok = false
         }
         if (ok) {
             out.put(okJson(id))
-            onStatus("ScalarCmd 已执行")
+            if (!DeltaMapper.enabled) onStatus("ScalarCmd 已执行")
         } else {
             out.put(errJson(id, "Device", "BLE 写入失败"))
         }
+    }
+
+    /**
+     * 差值模式下的伸缩通道:把上游的位置值按"位移/时间"换算成速度档位;
+     * 小冲程时改由振动通道代偿(见 [DeltaMapper])。
+     */
+    private fun oscillateByDelta(pos: Double): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        val r = DeltaMapper.map(pos, now)
+        lastCmdAt = now
+        watchdogTripped = false
+        val okVib = ble.vibrate(r.vib)
+        val okOsc = ble.oscillate(r.osc)
+        return okVib && okOsc
+    }
+
+    /** 差值模式看门狗:上游断流时把马达停掉,避免停在长开状态。 */
+    private fun startWatchdog() {
+        Thread {
+            // 自身不再是"当前服务器"实例(换端口/停止)时自动退出,不依赖 onStop()
+            while (running && MainActivity.server === this@ButtplugServer) {
+                try {
+                    Thread.sleep(60)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                if (!DeltaMapper.enabled) continue
+                val t = lastCmdAt
+                if (t == 0L || watchdogTripped) continue
+                if (SystemClock.elapsedRealtime() - t > WATCHDOG_MS) {
+                    watchdogTripped = true
+                    DeltaMapper.reset()
+                    ble.stopAll()
+                    onStatus("差值模式:${WATCHDOG_MS}ms 无新位置,双马达已停。")
+                }
+            }
+        }.apply { isDaemon = true }.start()
     }
 
     private fun okJson(id: Int) = JSONObject().put("Ok", JSONObject().put("Id", id))

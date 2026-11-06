@@ -23,6 +23,21 @@ intiface/intiface-central#297 and buttplugio/buttplug#968.
 - **Configurable port** (default `12345`, range 1024–65535), persisted across
   restarts; changing it while the server is running restarts the WebSocket
   service immediately (BLE stays connected) and copies the new address
+- **Delta mode for oscillation** (opt-in; original direct mode is the default).
+  funscript-style scripts are *position* timelines, but the motor only takes a
+  speed level. Delta mode converts per-frame displacement into speed:
+
+  ```
+  Δ%   = |pos_new − pos_prev| × 100
+  v    = Δ% / Δt(seconds)        # %/s
+  level= clamp(v / vMax, 0, 1) ^ gamma
+  ```
+
+  Bigger/faster moves → higher oscillation level. When Δ% falls below
+  `aMin` (small strokes), oscillation stops and the **vibration** motor takes
+  over at the computed level (with hysteresis to avoid flapping). A 250 ms
+  watchdog stops both motors if the upstream stops sending. `vMax` and
+  `aMin` are adjustable live from the UI and persisted.
 
 ## Usage
 
@@ -68,6 +83,15 @@ MIT
   - Index 1:**伸缩**(9 档)
 - 最后一个客户端断开时自动停止马达
 - **端口可自定义**(默认 `12345`,范围 1024–65535),重启 App 后仍保留;运行中修改会立即重启 WebSocket 服务(蓝牙连接不断开)并自动复制新地址
+- **伸缩差值模式**(可选,默认关闭,原有直控模式保持不变)。funscript 类脚本是「位置」时间轴,而马达只吃「速度档位」;差值模式把每帧位移换算成速度:
+
+  ```
+  Δ%   = |pos_new − pos_prev| × 100
+  v    = Δ% / Δt(秒)              # 单位 %/s
+  level= clamp(v / vMax, 0, 1) ^ gamma
+  ```
+
+  位移越大、间隔越短 → 伸缩档位越高。当 Δ% 小于 `aMin`(小冲程)时,伸缩停、**振动**按同样算出的档位代偿(带迟滞,避免阈值附近来回跳)。上游断流 250ms 未收到新位置会自动停双马达。`vMax` 与 `aMin` 可在界面上实时调并持久化。
 
 ### 使用方法
 

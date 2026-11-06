@@ -70,6 +70,56 @@ class MainActivity : AppCompatActivity() {
             applyPort(etPort)
         }
 
+        // ---- 伸缩映射:直控(原有) / 差值(位置→速度),默认直控 ----
+        val prefs = getPrefs()
+        DeltaMapper.enabled = prefs.getBoolean("delta_mode", false)
+        DeltaMapper.vMaxPctPerSec = prefs.getInt("delta_vmax", 800).toDouble()
+        DeltaMapper.aMinPct = prefs.getInt("delta_amin", 20).toDouble()
+
+        val seekVmax = findViewById<SeekBar>(R.id.seekVmax)
+        val seekAmin = findViewById<SeekBar>(R.id.seekAmin)
+        seekVmax.progress = (DeltaMapper.vMaxPctPerSec / 200).toInt().coerceIn(1, 10)
+        seekAmin.progress = (DeltaMapper.aMinPct / 5).toInt().coerceIn(0, 8)
+        paintDelta()
+
+        findViewById<Button>(R.id.btnDelta).setOnClickListener {
+            DeltaMapper.enabled = !DeltaMapper.enabled
+            DeltaMapper.reset()
+            prefs.edit().putBoolean("delta_mode", DeltaMapper.enabled).apply()
+            // 切模式时先把马达归零,避免残留档位
+            ble?.forceStopAll()
+            paintDelta()
+            LogHelper.log("DELTA", "mode -> ${DeltaMapper.enabled}")
+            toast(
+                if (DeltaMapper.enabled) "伸缩:差值模式(位移/间隔→速度,小冲程走振动)"
+                else "伸缩:直控模式(原有行为)"
+            )
+        }
+        seekVmax.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                val v = progress.coerceIn(1, 10) * 200
+                DeltaMapper.vMaxPctPerSec = v.toDouble()
+                prefs.edit().putInt("delta_vmax", v).apply()
+                paintDelta()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {
+                LogHelper.log("DELTA", "vmax -> ${DeltaMapper.vMaxPctPerSec}")
+            }
+        })
+        seekAmin.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                val v = progress.coerceIn(0, 8) * 5
+                DeltaMapper.aMinPct = v.toDouble()
+                prefs.edit().putInt("delta_amin", v).apply()
+                paintDelta()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {
+                LogHelper.log("DELTA", "amin -> ${DeltaMapper.aMinPct}")
+            }
+        })
+
         // ---- 手动控制:震动/伸缩独立滑条(本地直发,不受上游开关限制) ----
         val seekVib = findViewById<SeekBar>(R.id.seekVib)
         seekVib.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -188,18 +238,32 @@ class MainActivity : AppCompatActivity() {
             try { Thread.sleep(150) } catch (_: Exception) {}
             runOnUiThread {
                 val srv = ButtplugServer(port, b) { msg -> runOnUiThread { status(msg) } }
+                DeltaMapper.reset()
+                server = srv // 先登记,再启动(看门狗以此判断自身是否仍是当前实例)
                 try {
                     srv.start()
-                    server = srv
                     val addr = "ws://" + getLocalIp() + ":" + port
                     copyAddr("$addr\nws://127.0.0.1:$port")
                     status("端口已切换为 $port(地址已复制)\n局域网连接:$addr\n本机连接:ws://127.0.0.1:$port")
                 } catch (e: Exception) {
+                    server = null
                     status("新端口 $port 启动失败:${e.message}")
                 }
                 updateToggleUi()
             }
         }.start()
+    }
+
+    private fun paintDelta() {
+        val btn = findViewById<Button>(R.id.btnDelta)
+        val tvVmax = findViewById<TextView>(R.id.tvVmax)
+        val tvAmin = findViewById<TextView>(R.id.tvAmin)
+        val on = DeltaMapper.enabled
+        btn.text = if (on) "伸缩:差值(位移/间隔 → 速度)" else "伸缩:直控(位置当档位)"
+        btn.setBackgroundColor(if (on) 0xFF00897B.toInt() else 0xFF455A64.toInt())
+        btn.setTextColor(0xFFFFFFFF.toInt())
+        tvVmax.text = "满速线:%d %%/s(到这条线就是 100%% 档)".format(DeltaMapper.vMaxPctPerSec.toInt())
+        tvAmin.text = "小冲程阈值:<%d%%(以下改走振动)".format(DeltaMapper.aMinPct.toInt())
     }
 
     private fun paintGates() {
@@ -259,10 +323,12 @@ class MainActivity : AppCompatActivity() {
         b.start()
 
         val srv = ButtplugServer(port, b) { msg -> runOnUiThread { status(msg) } }
+        // 先登记再启动:看门狗线程以"是否仍是当前 server"作为存活判据
+        server = srv
         try {
             srv.start()
-            server = srv
         } catch (e: Exception) {
+            server = null
             status("服务器启动失败:${e.message}\n请点「停止」后重试。")
             b.shutdown()
             ble = null
@@ -282,6 +348,7 @@ class MainActivity : AppCompatActivity() {
     private fun stopAll() {
         try { server?.stop() } catch (_: Exception) {}
         server = null
+        DeltaMapper.reset()
         ble?.shutdown()
         ble = null
         vibGate = true
