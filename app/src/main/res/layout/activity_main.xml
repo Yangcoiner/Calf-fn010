@@ -121,7 +121,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
         android:fontFamily="monospace"
-        android:text="小冲程阈值:<20%(以下改走振动)"
+        android:text="小冲程阈值:&lt;20%(以下改走振动)"
         android:textSize="13sp" />
 
     <SeekBar
