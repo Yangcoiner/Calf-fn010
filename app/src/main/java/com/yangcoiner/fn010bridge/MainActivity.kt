@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Button
+import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -24,8 +25,13 @@ class MainActivity : AppCompatActivity() {
     private var vibGate = true
     private var oscGate = true
     private var calibrating = false
+    // 当前监听端口(可在界面上改,持久化到 SharedPreferences)
+    private var port = DEFAULT_PORT
 
     companion object {
+        const val DEFAULT_PORT = 12345
+        const val MIN_PORT = 1024
+        const val MAX_PORT = 65535
         // 进程级状态:Activity 重建(切后台/转屏)后服务器不会丢失,也不会重复绑定端口
         @Volatile var ble: BleManager? = null
         @Volatile var server: ButtplugServer? = null
@@ -49,9 +55,19 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btnExport).setOnClickListener { exportLog() }
         findViewById<Button>(R.id.btnCopy).setOnClickListener {
-            val addr = "ws://" + getLocalIp() + ":12345"
-            copyAddr(addr + "\nws://127.0.0.1:12345")
-            Toast.makeText(this, "已复制局域网+本机两个地址", Toast.LENGTH_SHORT).show()
+            val addr = "ws://" + getLocalIp() + ":" + port
+            copyAddr(addr + "\nws://127.0.0.1:" + port)
+            Toast.makeText(this, "已复制局域网+本机两个地址(端口 $port)", Toast.LENGTH_SHORT).show()
+        }
+
+        // ---- 端口设置:持久化保存;若服务器正在运行则自动重启以绑定新端口 ----
+        port = getPrefs().getInt("port", DEFAULT_PORT)
+        val etPort = findViewById<EditText>(R.id.etPort)
+        etPort.setText(port.toString())
+        findViewById<Button>(R.id.btnPort).setOnClickListener { applyPort(etPort) }
+        findViewById<Button>(R.id.btnPortReset).setOnClickListener {
+            etPort.setText(DEFAULT_PORT.toString())
+            applyPort(etPort)
         }
 
         // ---- 手动控制:震动/伸缩独立滑条(本地直发,不受上游开关限制) ----
@@ -129,6 +145,63 @@ class MainActivity : AppCompatActivity() {
 
     private fun getPrefs() = getSharedPreferences("fn010", Context.MODE_PRIVATE)
 
+    /** 读取输入框端口并应用:校验 -> 持久化 -> 运行中则重启服务。 */
+    private fun applyPort(et: EditText) {
+        val raw = et.text.toString().trim()
+        val v = raw.toIntOrNull()
+        if (v == null || v !in MIN_PORT..MAX_PORT) {
+            toast("端口需为 $MIN_PORT~$MAX_PORT 之间的整数")
+            et.setText(port.toString())
+            return
+        }
+        if (v == port) {
+            toast("端口未改变:$port")
+            return
+        }
+        val old = port
+        port = v
+        getPrefs().edit().putInt("port", v).apply()
+        LogHelper.log("PORT", "change $old -> $v (server=${server != null})")
+        if (server != null) {
+            restartServer()
+            toast("端口已切换为 $v,服务器已重启")
+        } else {
+            toast("端口已设置为 $v,下次启动生效")
+            status("端口已设置为 $v,点「启动服务器并扫描」后生效。")
+        }
+    }
+
+    /**
+     * 只重启 WebSocket 服务,保留蓝牙连接(切端口时不必重新扫描设备)。
+     * BLE 为空(未启动过)则直接走完整启动流程。
+     */
+    private fun restartServer() {
+        val b = ble
+        if (b == null) {
+            startAll()
+            return
+        }
+        try { server?.stop() } catch (_: Exception) {}
+        server = null
+        // WebSocketServer.stop() 是异步的,短暂等待端口释放后再绑新端口
+        Thread {
+            try { Thread.sleep(150) } catch (_: Exception) {}
+            runOnUiThread {
+                val srv = ButtplugServer(port, b) { msg -> runOnUiThread { status(msg) } }
+                try {
+                    srv.start()
+                    server = srv
+                    val addr = "ws://" + getLocalIp() + ":" + port
+                    copyAddr("$addr\nws://127.0.0.1:$port")
+                    status("端口已切换为 $port(地址已复制)\n局域网连接:$addr\n本机连接:ws://127.0.0.1:$port")
+                } catch (e: Exception) {
+                    status("新端口 $port 启动失败:${e.message}")
+                }
+                updateToggleUi()
+            }
+        }.start()
+    }
+
     private fun paintGates() {
         val bv = findViewById<Button>(R.id.btnVib)
         val bo = findViewById<Button>(R.id.btnOsc)
@@ -167,13 +240,17 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun startAll() {
+        // 每次启动都以当前设置(或输入框)的端口为准
+        port = getPrefs().getInt("port", DEFAULT_PORT)
+        findViewById<EditText>(R.id.etPort)?.setText(port.toString())
+
         val bt = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         if (bt.adapter == null) {
             status("未检测到蓝牙适配器。")
             return
         }
         if (server != null) {
-            status("服务器已在运行中(端口 12345),无需重复启动。")
+            status("服务器已在运行中(端口 $port),无需重复启动。")
             return
         }
 
@@ -181,7 +258,7 @@ class MainActivity : AppCompatActivity() {
         ble = b
         b.start()
 
-        val srv = ButtplugServer(12345, b) { msg -> runOnUiThread { status(msg) } }
+        val srv = ButtplugServer(port, b) { msg -> runOnUiThread { status(msg) } }
         try {
             srv.start()
             server = srv
@@ -193,11 +270,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val addr = "ws://" + getLocalIp() + ":12345"
+        val addr = "ws://" + getLocalIp() + ":" + port
         copyAddr(addr)
         status("Buttplug 服务器已启动(局域网地址已复制)\n" +
                "局域网连接:$addr\n" +
-               "本机连接:ws://127.0.0.1:12345\n" +
+               "本机连接:ws://127.0.0.1:$port\n" +
                "正在扫描 FN010-RX ...")
         updateToggleUi()
     }

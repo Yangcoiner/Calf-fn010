@@ -16,7 +16,7 @@ import java.net.InetSocketAddress
  * plus StopDeviceCmd / StopAllDevicesCmd.
  */
 class ButtplugServer(
-    port: Int,
+    val port: Int,
     private val ble: BleManager,
     private val onStatus: (String) -> Unit
 ) : WebSocketServer(InetSocketAddress(port)) {
@@ -53,7 +53,7 @@ class ButtplugServer(
 
     override fun onError(ws: WebSocket?, ex: Exception) {
         if (ex.message?.contains("Address already in use") == true) {
-            onStatus("端口 12345 已被占用,请点「全部停止」后重新启动。")
+            onStatus("端口 $port 已被占用,请点「停止」后换个端口重试。")
         } else {
             onStatus("WebSocket 错误:${ex.message}")
         }

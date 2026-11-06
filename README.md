@@ -20,6 +20,9 @@ intiface/intiface-central#297 and buttplugio/buttplug#968.
   - Index 0: **Vibrate** (9 steps)
   - Index 1: **Oscillate** (9 steps)
 - Motors are force-stopped when the last client disconnects
+- **Configurable port** (default `12345`, range 1024–65535), persisted across
+  restarts; changing it while the server is running restarts the WebSocket
+  service immediately (BLE stays connected) and copies the new address
 
 ## Usage
 
@@ -28,7 +31,9 @@ intiface/intiface-central#297 and buttplugio/buttplug#968.
    Bluetooth permissions.
 3. Find your phone's IP (e.g. in Wi-Fi settings).
 4. In Intiface Central: connect to a custom server at `ws://<phone-ip>:12345`
-   (or point your game/client there).
+   (or point your game/client there). Need another port? Type it in the
+   **端口 (port)** field and tap **应用** before starting, or any time later
+   to switch on the fly.
 5. Tap **Stop** in the app to shut everything down safely.
 
 ## Building
@@ -62,13 +67,14 @@ MIT
   - Index 0:**震动**(9 档)
   - Index 1:**伸缩**(9 档)
 - 最后一个客户端断开时自动停止马达
+- **端口可自定义**(默认 `12345`,范围 1024–65535),重启 App 后仍保留;运行中修改会立即重启 WebSocket 服务(蓝牙连接不断开)并自动复制新地址
 
 ### 使用方法
 
 1. 安装 APK(由 GitHub Actions 云构建,见下)。
 2. 打开玩具电源,启动本 App,点 **Start Server + Scan**,授予蓝牙权限。
 3. 查看手机 IP(在 Wi-Fi 设置里)。
-4. 在 Intiface Central 中连接自定义服务器 `ws://<手机IP>:12345`(或把游戏/客户端指向该地址)。
+4. 在 Intiface Central 中连接自定义服务器 `ws://<手机IP>:12345`(或把游戏/客户端指向该地址)。想换端口:在「端口」输入框填数字后点「应用」;启动前或运行中随时可改,运行中改会立即重启服务并复制新地址。
 5. 用完后点 App 里的 **Stop** 安全关闭。
 
 ### 构建
