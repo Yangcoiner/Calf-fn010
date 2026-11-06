@@ -16,10 +16,11 @@ import java.net.InetSocketAddress
  * plus StopDeviceCmd / StopAllDevicesCmd.
  */
 class ButtplugServer(
-    val port: Int,
+    // 注意:不能叫 port —— 会与父类 WebSocketServer.getPort() 冲突(Kotlin "Accidental override")
+    val listenPort: Int,
     private val ble: BleManager,
     private val onStatus: (String) -> Unit
-) : WebSocketServer(InetSocketAddress(port)) {
+) : WebSocketServer(InetSocketAddress(listenPort)) {
 
     companion object {
         const val MESSAGE_VERSION = 3
@@ -36,7 +37,7 @@ class ButtplugServer(
     }
 
     override fun onStart() {
-        onStatus("Buttplug 服务器监听端口 $port")
+        onStatus("Buttplug 服务器监听端口 $listenPort")
     }
 
     override fun onOpen(ws: WebSocket, handshake: ClientHandshake) {
@@ -53,7 +54,7 @@ class ButtplugServer(
 
     override fun onError(ws: WebSocket?, ex: Exception) {
         if (ex.message?.contains("Address already in use") == true) {
-            onStatus("端口 $port 已被占用,请点「停止」后换个端口重试。")
+            onStatus("端口 $listenPort 已被占用,请点「停止」后换个端口重试。")
         } else {
             onStatus("WebSocket 错误:${ex.message}")
         }
