@@ -50,9 +50,13 @@ object DeltaMapper {
         val small: Boolean      // 本帧是否判定为小冲程
     )
 
+    /** 连续多少帧低于阈值才真正判为小冲程（单帧抖动不该掐掉伸缩）。 */
+    private const val SMALL_CONFIRM_FRAMES = 2
+
     private var lastPos = Double.NaN
     private var lastAt = 0L
     private var inSmall = false
+    private var smallStreak = 0
 
     /** 清空状态(切换模式 / 停止 / 重连时调用)。 */
     @Synchronized
@@ -60,6 +64,7 @@ object DeltaMapper {
         lastPos = Double.NaN
         lastAt = 0L
         inSmall = false
+        smallStreak = 0
     }
 
     /**
@@ -88,11 +93,17 @@ object DeltaMapper {
         var level = (v / vMaxPctPerSec).coerceIn(0.0, 1.0)
         if (gamma != 1.0) level = Math.pow(level, gamma)
 
-        // 小冲程迟滞
+        // 小冲程迟滞：进入要连续 SMALL_CONFIRM_FRAMES 帧，退出只要一帧高于 aMin*1.5。
+        // 单帧就切振动的话，播放器看起来就是「伸缩不响应」。
+        if (dPct < aMinPct) smallStreak++ else smallStreak = 0
+
         if (inSmall) {
-            if (dPct > aMinPct * HYSTERESIS) inSmall = false
+            if (dPct > aMinPct * HYSTERESIS) {
+                inSmall = false
+                smallStreak = 0
+            }
         } else {
-            if (dPct < aMinPct) inSmall = true
+            if (smallStreak >= SMALL_CONFIRM_FRAMES) inSmall = true
         }
 
         return if (inSmall) {

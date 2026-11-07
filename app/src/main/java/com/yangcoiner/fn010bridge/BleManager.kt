@@ -21,7 +21,11 @@ import java.util.UUID
  *   handshake: write af00 to ee01, device replies on ee02: af00 03 01 00 5x
  *   command:   ac [motor] [on/off] 00 01 [speed]   (6 bytes, write-without-response)
  *              motor: 01 = vibration, 03 = oscillation
- *              speed: 0x1F + 0x19 * (level-1), 9 levels, 0x1F..0xE7
+ *              speed: 0x1F..0xFF 线性，100 档（0x1F=1 档, 0x8F=50 档, 0xFF=100 档）
+ *
+ * 档位说明：上游原版只用了 9 个台阶、最高 0xE7（232..255 整段没用上）。
+ * 设备握手回的 af00 03 01 00 64 里 0x64=100，即硬件支持 100 档，
+ * 这里按 100 档线性映射，别退回 9 档。
  */
 @SuppressLint("MissingPermission")
 class BleManager(
@@ -32,8 +36,8 @@ class BleManager(
         const val MOTOR_VIBRATION = 0x01
         const val MOTOR_OSCILLATION = 0x03
         const val BASE_SPEED = 0x1F
-        const val SPEED_STEP = 0x19
-        const val LEVELS = 9
+        const val MAX_SPEED = 0xFF
+        const val STEPS = 100
 
         val SVC_FFee = UUID.fromString("0000ffee-0000-1000-8000-00805f9b34fb")
         val CH_WRITE = UUID.fromString("0000ee01-0000-1000-8000-00805f9b34fb")
@@ -216,11 +220,12 @@ class BleManager(
         }
     }
 
-    /** Map a 0.0..1.0 scalar to the 9-level speed byte (0 => stop). */
+    /** Map a 0.0..1.0 scalar to the 100-level speed byte (0 => stop). */
     fun speedFromScalar(scalar: Double): Int {
         if (scalar <= 0.001) return 0
-        val level = (scalar * LEVELS).toInt().coerceIn(1, LEVELS)
-        return BASE_SPEED + SPEED_STEP * (level - 1)
+        val level = Math.round(scalar * STEPS).toInt().coerceIn(1, STEPS)
+        val step = (MAX_SPEED - BASE_SPEED).toDouble() / (STEPS - 1)
+        return Math.round(BASE_SPEED + step * (level - 1)).toInt()
     }
 
     private var lastVibFrame: ByteArray? = null

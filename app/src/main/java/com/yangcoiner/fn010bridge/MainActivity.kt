@@ -126,7 +126,8 @@ class MainActivity : AppCompatActivity() {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 tvVibLevel.text = if (progress == 0) "震动:关" else "震动:$progress 档"
                 val b = ble ?: return
-                b.vibrate(progress / 9.0, manual = true)
+                b.vibrate(progress / BleManager.STEPS.toDouble(), manual = true)
+                server?.noteManual(osc = false)
                 LogHelper.log("MANUAL", "vib slider -> $progress")
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -137,7 +138,8 @@ class MainActivity : AppCompatActivity() {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 tvOscLevel.text = if (progress == 0) "伸缩:关" else "伸缩:$progress 档"
                 val b = ble ?: return
-                b.oscillate(progress / 9.0, manual = true)
+                b.oscillate(progress / BleManager.STEPS.toDouble(), manual = true)
+                server?.noteManual(osc = true)
                 LogHelper.log("MANUAL", "osc slider -> $progress")
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -164,6 +166,22 @@ class MainActivity : AppCompatActivity() {
             toast(if (oscGate) "伸缩:响应上游请求" else "伸缩:已屏蔽上游请求")
         }
 
+        // ---- 通道路由(联动):长按切换,上游只发一个通道时另一通道跟着动 ----
+        findViewById<Button>(R.id.btnVib).setOnLongClickListener {
+            val srv = server ?: run { toast("请先启动服务器"); return@setOnLongClickListener true }
+            srv.mirrorVibToOsc = !srv.mirrorVibToOsc
+            toast(if (srv.mirrorVibToOsc) "联动:震动 -> 伸缩 已开启" else "联动:震动 -> 伸缩 已关闭")
+            LogHelper.log("LINK", "vib->osc ${srv.mirrorVibToOsc}")
+            true
+        }
+        findViewById<Button>(R.id.btnOsc).setOnLongClickListener {
+            val srv = server ?: run { toast("请先启动服务器"); return@setOnLongClickListener true }
+            srv.mirrorOscToVib = !srv.mirrorOscToVib
+            toast(if (srv.mirrorOscToVib) "联动:伸缩 -> 震动 已开启" else "联动:伸缩 -> 震动 已关闭")
+            LogHelper.log("LINK", "osc->vib ${srv.mirrorOscToVib}")
+            true
+        }
+
         // ---- 校准:伸缩以 1 档低速运行 N 秒后自动停止,作为行程时间基准 ----
         findViewById<Button>(R.id.btnCalib).setOnClickListener {
             val b = ble ?: run { toast("请先启动服务器并连接设备"); return@setOnClickListener }
@@ -172,7 +190,7 @@ class MainActivity : AppCompatActivity() {
             val seconds = getPrefs().getFloat("calib_seconds", 3.0f)
             Toast.makeText(this, "校准中:1档伸缩 ${seconds}s 后自动停止...", Toast.LENGTH_SHORT).show()
             LogHelper.log("CALIB", "start ${seconds}s @ level 1")
-            b.oscillate(1.0 / 9, manual = true)
+            b.oscillate(1.0 / BleManager.STEPS, manual = true)
             Thread {
                 try { Thread.sleep((seconds * 1000).toLong()) } catch (_: Exception) {}
                 b.oscillate(0.0, manual = true)
